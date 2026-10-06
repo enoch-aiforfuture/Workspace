@@ -261,6 +261,25 @@ def test_conflicting_runtime_attestations_are_not_ready():
     )
 
 
+def test_explicit_no_issue_attestation_satisfies_the_linked_issue_gate():
+    body = _body().replace(
+        "Fixes #5934",
+        "The issue tracker has no tracked issue for this change.",
+    )
+    calls = _run_checker(["README.md"], body)
+
+    assert not any(call["method"] == "setFailed" for call in calls)
+    assert "Linked Issue" not in _comment(calls)
+
+
+def test_placeholder_fixes_hash_still_fails_the_linked_issue_gate():
+    body = _body().replace("Fixes #5934", "Fixes #")
+    calls = _run_checker(["README.md"], body)
+
+    assert any(call["method"] == "setFailed" for call in calls)
+    assert "Linked Issue" in _comment(calls)
+
+
 def test_structurally_invalid_description_still_fails_hard_gate():
     calls = _run_checker(
         ["README.md"],

@@ -33,8 +33,11 @@ module.exports = async ({ github, context, core }) => {
   //    keyword-prefixed form previously false-flagged correctly-linked PRs.
   const linkedSection = section('Linked Issue');
   const hasIssueRef = /#\d+\b/.test(linkedSection) || /\/issues\/\d+/.test(linkedSection);
-  if (!linkedSection || !hasIssueRef) {
-    descriptionProblems.push('**Linked Issue** — add a reference like `Fixes #NNN`, a bare `#NNN`, or a link to the issue.');
+  // An explicit "no tracked issue" sentence is an attestation, not a number.
+  // The template's bare "Fixes #" still fails. Do not invent an issue id.
+  const attestsNoIssue = /no (?:tracked |linked |open )?issues?\b/i.test(linkedSection);
+  if (!linkedSection || (!hasIssueRef && !attestsNoIssue)) {
+    descriptionProblems.push('**Linked Issue** — add a reference like `Fixes #NNN`, a bare `#NNN`, a link to the issue, or a sentence that there is no tracked issue.');
   }
 
   // 3. At least one Type of Change box must be checked.

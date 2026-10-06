@@ -10,6 +10,12 @@
 #   - pip-audit: scans the project's current Python requirements against the
 #     advisory database. Advisory only (it never blocks a merge), because it can
 #     flag a pre-existing issue in an already-shipped dependency.
+#
+# dependency-review-action fails closed when the repository dependency graph
+# is disabled ("Dependency review is not supported on this repository").
+# Enabling it is a repo admin setting (Settings → Code security, or
+# PUT /repos/{owner}/{repo}/dependency-graph/enable). A workflow cannot turn
+# that on, and this file does not skip the job to fake a pass.
 
 name: Dependency review
 

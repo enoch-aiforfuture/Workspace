@@ -9,7 +9,9 @@
 ## Linked Issue
 
 <!-- Every PR should be linked to an issue.
-     Use one of:  Fixes #NNN  |  Part of #NNN  |  Closes #NNN  -->
+     Use one of:  Fixes #NNN  |  Part of #NNN  |  Closes #NNN
+     If the tracker has no issue for this change, say "no tracked issue"
+     in a sentence. Do not invent a number. -->
 
 Fixes #
 
