@@ -275,7 +275,7 @@ async def do_manage_tasks(content: str, owner: Optional[str] = None) -> Dict:
     """Handle manage_tasks tool calls: CRUD on scheduled tasks."""
     import uuid as _uuid
     from core.database import SessionLocal, ScheduledTask
-    from src.task_scheduler import compute_next_run
+    from src.task_scheduler import compute_next_run, _resolve_task_timezone
 
     try:
         args = _parse_tool_args(content)
@@ -415,10 +415,16 @@ async def do_manage_tasks(content: str, owner: Optional[str] = None) -> Dict:
                     setattr(task, field, args[field])
                     changed.append(field)
                     schedule_changed = True
+            # manage_tasks documents scheduled_time as UTC. A UI-created task
+            # stores that field as local wall clock once timezone is set, so an
+            # agent time edit clears the zone and the UTC contract holds.
+            if args.get("scheduled_time") is not None:
+                task.timezone = None
 
             if schedule_changed and (task.trigger_type or "schedule") == "schedule":
                 task.next_run = compute_next_run(
                     task.schedule, task.scheduled_time, task.scheduled_day,
+                    tz_name=_resolve_task_timezone(db, task),
                 )
 
             db.commit()
@@ -455,6 +461,7 @@ async def do_manage_tasks(content: str, owner: Optional[str] = None) -> Dict:
                 if (task.trigger_type or "schedule") == "schedule":
                     task.next_run = compute_next_run(
                         task.schedule, task.scheduled_time, task.scheduled_day,
+                        tz_name=_resolve_task_timezone(db, task),
                     )
             db.commit()
             return {"response": f"Task '{task.name}' {action}d", "exit_code": 0}
