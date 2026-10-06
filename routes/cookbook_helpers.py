@@ -714,6 +714,52 @@ def _normalize_llama_cpp_python_cache_types(cmd: str | None) -> str | None:
     return _LLAMA_CPP_PYTHON_TYPE_FLAG_RE.sub(repl, cmd)
 
 
+# llama.cpp reasoning GGUFs spend the reply in reasoning_content unless the
+# server is started with reasoning disabled. Narrower than the chat thinking
+# list: Gemma and Mistral names are not this llama-server failure.
+_LLAMA_REASONING_MARKERS = (
+    "qwen3",
+    "qwq",
+    "deepseek-r1",
+    "deepseek-reasoner",
+    "magistral",
+)
+_LLAMA_REASONING_FLAG_RE = re.compile(r"(?:^|\s)--reasoning(?:\s|=|$)")
+
+
+def _normalize_llama_server_reasoning(cmd: str | None, repo_id: str | None = None) -> str | None:
+    """Append ``--reasoning off`` when this app is about to launch llama-server.
+
+    Cookbook-generated commands, the serve form, saved presets, agent
+    ``cmd`` strings, and retries all pass through ``/api/model/serve``, so
+    this covers hand-written commands as well as the default builder. An
+    explicit ``--reasoning`` value is left as the operator wrote it.
+
+    Not changed here:
+    - a llama-server process that is already running (its argv is fixed;
+      the flag is applied the next time this app launches or retries it)
+    - a process started outside Cookbook and only seen by the process scan
+    - ``python -m llama_cpp.server``, which does not accept this flag
+    """
+    if not cmd or "llama-server" not in cmd.lower():
+        return cmd
+    if _LLAMA_REASONING_FLAG_RE.search(cmd):
+        return cmd
+    try:
+        parts = shlex.split(cmd)
+    except ValueError:
+        return cmd
+    env_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+    first = next((part for part in parts if not env_re.match(part)), "")
+    binary = os.path.basename(first).lower()
+    if binary not in {"llama-server", "llama-server.exe"}:
+        return cmd
+    blob = f"{cmd} {repo_id or ''}".lower()
+    if not any(marker in blob for marker in _LLAMA_REASONING_MARKERS):
+        return cmd
+    return cmd.rstrip() + " --reasoning off"
+
+
 def _check_serve_binary(seg: str) -> None:
     """Validate that a single command segment starts with an allowlisted binary
     (after skipping leading env-var assignments like `CUDA_VISIBLE_DEVICES=0`)."""
@@ -1087,6 +1133,37 @@ class ServeRequest(BaseModel):
     platform: str | None = None    # "linux", "termux", or "windows"
 
 
+_HTTP_ACCESS_RE = re.compile(r'(?:GET|POST)\s+/([^\s]*)\s+HTTP/[\d.]+"\s*(\d{3})')
+
+
+def _snapshot_is_llama_server(flat: str) -> bool:
+    """True when the tmux snapshot is a llama-server process, not another engine."""
+    return re.search(r"llama[-_]server", flat or "", re.I) is not None
+
+
+def _llama_server_http_ready(flat: str) -> bool:
+    """llama-server is serving only after the weights are actually loaded.
+
+    `/v1/models` returns 200 during load. `/health` stays 503 until the model
+    is in, and the server logs `model loaded` at that point. A later 2xx on
+    any other path (chat, completions) also means it is serving. 503 does not.
+    """
+    if re.search(r"\bmodel loaded\b", flat or "", re.I):
+        return True
+    accesses = [(m.group(1), m.group(2)) for m in _HTTP_ACCESS_RE.finditer(flat or "")]
+    for path, code in accesses:
+        norm = path.split("?", 1)[0].strip("/")
+        if norm in {"health", "v1/health"} and code == "200":
+            return True
+    for path, code in accesses:
+        norm = path.split("?", 1)[0].strip("/")
+        if norm in {"v1/models", "models"}:
+            continue
+        if code.startswith("2"):
+            return True
+    return False
+
+
 def _parse_serve_phase(snapshot: str, task_type: str = "serve") -> dict:
     """Parse a tmux snapshot of a serve task into structured phase info.
 
@@ -1128,8 +1205,13 @@ def _parse_serve_phase(snapshot: str, task_type: str = "serve") -> dict:
         return {"phase": "ready", "status": "ready"}
     if re.search(r'Ollama API ready on port\s+\d+', flat, re.I):
         return {"phase": "ready", "status": "ready"}
-    # HTTP access logs (e.g. GET /v1/models 200 OK) mean the server is up and serving
-    if re.search(r'(?:GET|POST)\s+/[^\s]*\s+HTTP/[\d.]+"\s*\d{3}', flat):
+    # HTTP access logs mean most servers are up. llama-server is the exception:
+    # GET /v1/models returns 200 while weights are still loading, and chat
+    # answers 503 "Loading model" until `model loaded` / GET /health 200.
+    if _snapshot_is_llama_server(flat):
+        if _llama_server_http_ready(flat):
+            return {"phase": "idle", "status": "ready"}
+    elif re.search(r'(?:GET|POST)\s+/[^\s]*\s+HTTP/[\d.]+"\s*\d{3}', flat):
         return {"phase": "idle", "status": "ready"}
     if "Loading weights took" in flat:
         return {"phase": "initializing", "status": "running"}

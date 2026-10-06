@@ -578,7 +578,8 @@ FUNCTION_TOOL_SCHEMAS = [
                                      "description": "schedule = time-based, event = count-based"},
                     "schedule": {"type": "string", "enum": ["once", "daily", "weekly", "monthly"],
                                  "description": "Schedule frequency (for trigger_type=schedule)"},
-                    "scheduled_time": {"type": "string", "description": "HH:MM in UTC (for schedule triggers). Convert the user's stated local time using the UTC offset given in the 'Current date and time' context."},
+                    "scheduled_time": {"type": "string", "description": "HH:MM wall clock for schedule triggers. When the current-date context names an IANA timezone, pass the user's stated local time and do not convert it to UTC. When no IANA timezone is known, pass HH:MM in UTC."},
+                    "timezone": {"type": "string", "description": "Optional IANA timezone for scheduled_time, for example America/Chicago. Overrides the browser zone. Pass an empty string to store scheduled_time as UTC and clear a saved zone."},
                     "scheduled_day": {"type": "integer", "description": "Day of week 0=Mon (weekly) or day of month (monthly)"},
                     "trigger_event": {"type": "string", "enum": ["session_created", "message_sent", "document_created", "memory_added", "research_completed", "email_received", "skill_added"],
                                       "description": "Event name (for trigger_type=event)"},
@@ -780,7 +781,8 @@ FUNCTION_TOOL_SCHEMAS = [
                     "webhook_id": {"type": "string", "description": "Webhook ID (for delete/enable/disable)"},
                     "name": {"type": "string", "description": "Webhook name (for add)"},
                     "url": {"type": "string", "description": "Webhook URL (for add)"},
-                    "events": {"type": "string", "description": "Comma-separated event names (for add)"}
+                    "secret": {"type": "string", "description": "HMAC signing secret (for add). Stored encrypted. Deliveries send X-Workspace-Signature. Never echoed back."},
+                    "events": {"type": "string", "description": "Comma-separated event names (for add): session.created, chat.completed, chat.message"}
                 },
                 "required": ["action"]
             }
@@ -790,13 +792,15 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "manage_tokens",
-            "description": "Manage API access tokens: list existing tokens, create new ones, or delete them.",
+            "description": "Manage API access tokens: list existing tokens, create new ones, or delete them. Created tokens use the wsp_ prefix auth accepts, belong to the current user, and default to the chat scope.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["list", "create", "delete"]},
                     "token_id": {"type": "string", "description": "Token ID (for delete)"},
-                    "name": {"type": "string", "description": "Token name (for create)"}
+                    "name": {"type": "string", "description": "Token name (for create)"},
+                    "scopes": {"type": "string", "description": "Comma-separated scopes for create. Defaults to chat. Unknown scopes are rejected."},
+                    "profile": {"type": "string", "description": "Named scope profile for create (chat, codex_todos, codex_documents, codex_email_drafts). Used instead of scopes when set."}
                 },
                 "required": ["action"]
             }

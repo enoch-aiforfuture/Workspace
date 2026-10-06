@@ -124,7 +124,7 @@ Deep research wraps fetched webpage content through `untrusted_context_message("
 
 ## Optional And Platform Behavior
 
-`ddgs` is optional; provider code has an HTML fallback. Search cache and analytics state live under the shared data dir and mkdir failures in read-only image layers are tolerated where possible. PDF extraction uses `pdfminer.six` only when installed. Native SearXNG defaults to `http://localhost:8080`; Docker uses the compose `searxng` service URL and pins the SearXNG image with a healthcheck.
+`ddgs` is optional; provider code has an HTML fallback. Search cache and analytics state live under the shared data dir and mkdir failures in read-only image layers are tolerated where possible. PDF extraction prefers `pdfminer.six` when it is installed and falls back to `pypdf` (a required dependency) so default and Docker installs still return text. Native SearXNG defaults to `http://localhost:8080`; Docker uses the compose `searxng` service URL and pins the SearXNG image with a healthcheck.
 
 Compose preserves retained SearXNG settings but runs `scripts/migrate_searxng_settings.py` before startup to add missing `use_default_settings: true` inheritance. The migration accepts only a regular single-document YAML mapping, preserves BOM/newline/style/ownership/mode, writes and directory-fsyncs atomically, and no-ops when the key exists. Compose treats migration failure as non-fatal so SearXNG health reports the retained-file problem instead of the wrapper command preventing startup.
 

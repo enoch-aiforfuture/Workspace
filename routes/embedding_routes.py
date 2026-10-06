@@ -175,11 +175,11 @@ def setup_embedding_routes():
         try:
             # Run in thread to not block the event loop
             loop = asyncio.get_running_loop()
-            cache = _cache_dir()
-            await loop.run_in_executor(
-                None,
-                lambda: TextEmbedding(model_name=model_name, cache_dir=cache),
-            )
+            # Reuse the process-wide session. A throwaway TextEmbedding would
+            # download the weights and then drop them, and the next embed
+            # would load a second copy.
+            from src.embeddings import get_fastembed_client
+            await loop.run_in_executor(None, lambda: get_fastembed_client(model_name))
             return {"status": "downloaded", "model": model_name}
         except Exception as e:
             logger.error(f"Failed to download {model_name}: {e}")

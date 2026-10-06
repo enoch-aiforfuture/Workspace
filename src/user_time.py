@@ -121,6 +121,24 @@ def timezone_label(dt: Optional[datetime] = None) -> str:
     return offset_label
 
 
+def _manage_tasks_time_sentence() -> str:
+    """Tell the model which clock manage_tasks stores.
+
+    A valid IANA name means scheduled_time is that zone's wall clock. A fixed
+    offset is not stored (it drifts across DST), so the UTC contract remains.
+    """
+    if _zoneinfo_from_name() is not None:
+        return (
+            "When scheduling a task with manage_tasks, pass scheduled_time as "
+            "HH:MM in this user's local wall clock. Do not convert it to UTC; "
+            "the tool stores that clock with the user's timezone.\n\n"
+        )
+    return (
+        "When scheduling a task with manage_tasks, scheduled_time is in UTC: "
+        "convert the user's stated local time using the UTC offset above.\n\n"
+    )
+
+
 def current_datetime_prompt(now_utc: Optional[datetime] = None) -> str:
     """Build reusable system prompt text for date/time reasoning."""
     if now_utc is None:
@@ -144,8 +162,7 @@ def current_datetime_prompt(now_utc: Optional[datetime] = None) -> str:
         "user used a relative date.\n"
         "When scheduling calendar events with manage_calendar, pass local ISO "
         "datetimes resolved against this user-local date/time.\n"
-        "When scheduling a task with manage_tasks, scheduled_time is in UTC: "
-        "convert the user's stated local time using the UTC offset above.\n\n"
+        f"{_manage_tasks_time_sentence()}"
     )
 
 
@@ -163,8 +180,8 @@ def current_datetime_context_message_for_tz(
     Timezone resolution:
     * ``iana_tz_name`` is a valid IANA name (e.g. ``"Europe/Berlin"``) → uses that zone.
     * ``iana_tz_name`` is ``None`` OR resolves to an invalid zone → falls back to UTC.
-      This matches the existing scheduler behaviour: tasks without a linked crew
-      timezone render in UTC, not server-local time.
+      The scheduler passes the task's own timezone, then a linked crew member's
+      timezone, and UTC when neither is set. It does not use the server's local zone.
     """
     if now_utc is None:
         utc_now = datetime.now(timezone.utc)

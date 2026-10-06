@@ -52,6 +52,27 @@ def test_model_cache_path_rejects_top_level_symlink_escape(tmp_path, monkeypatch
     assert embedding_routes._is_downloaded("org/test-model") is False
 
 
+def test_download_reuses_process_fastembed_client(monkeypatch):
+    _install_fastembed_stub(monkeypatch)
+    monkeypatch.setattr(embedding_routes, "_is_downloaded", lambda _src: False)
+    calls = []
+
+    def _client(model=None):
+        calls.append(model)
+        return object()
+
+    import src.embeddings as embeddings
+    monkeypatch.setattr(embeddings, "get_fastembed_client", _client)
+    download = _route_endpoint("/api/embeddings/models/{model_name:path}/download", "POST")
+
+    import asyncio
+    result = asyncio.run(download("test-model"))
+
+    assert result == {"status": "downloaded", "model": "test-model"}
+    assert calls == ["test-model"]
+    assert "test-model" not in embedding_routes._downloading
+
+
 def test_delete_model_rejects_symlink_cache_dir(tmp_path, monkeypatch):
     cache = tmp_path / "cache"
     outside = tmp_path / "outside"

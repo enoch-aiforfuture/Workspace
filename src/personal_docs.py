@@ -211,14 +211,28 @@ class PersonalDocsManager:
     def __init__(self, personal_dir: str, rag_manager=None):
         self.personal_dir = personal_dir
         self.rag_manager = rag_manager
-        self.index = []
+        # Built on first read. Constructing this manager at import time must
+        # not re-extract every tracked file before the server can listen.
+        self._index: List[Dict[str, Any]] = []
+        self._index_ready = False
         self.indexed_directories = []  # Track additional directories
         self.excluded_files: Set[str] = set()  # Files removed from RAG listing
         self.directories_file = os.path.join(personal_dir, "indexed_directories.json")
         self._excluded_file = os.path.join(personal_dir, "excluded_files.json")
         self.load_directories()
         self._load_excluded()
-        self.refresh_index()
+
+    @property
+    def index(self) -> List[Dict[str, Any]]:
+        """Indexed documents. The first read walks and extracts tracked files."""
+        if not self._index_ready:
+            self.refresh_index()
+        return self._index
+
+    @index.setter
+    def index(self, value) -> None:
+        self._index = list(value or [])
+        self._index_ready = True
 
     def load_directories(self):
         """Load the list of indexed directories from persistent storage."""
@@ -383,7 +397,7 @@ class PersonalDocsManager:
 
     def refresh_index(self):
         """Refresh the document index including all tracked directories."""
-        self.index = []
+        built: List[Dict[str, Any]] = []
 
         # Index the base personal directory
         base_files = load_personal_index(self.personal_dir)
@@ -391,7 +405,7 @@ class PersonalDocsManager:
             if os.path.abspath(f.get("path", "")) in self.excluded_files:
                 continue
             f['source_dir'] = self.personal_dir
-            self.index.append(f)
+            built.append(f)
 
         # Index additional directories
         for directory in self.indexed_directories:
@@ -411,9 +425,14 @@ class PersonalDocsManager:
                 # Update the name to include the directory for clarity
                 f['source_dir'] = directory
                 f['name'] = f"{os.path.basename(directory)}/{f['name']}"
-                self.index.append(f)
+                built.append(f)
 
-        logger.info(f"Refreshed index: {len(self.index)} documents from {len(self.indexed_directories) + 1} directories")
+        # Assign the private list directly. Writing through the property would
+        # mark the index ready before this walk finishes, and reading it from
+        # inside the walk would recurse.
+        self._index = built
+        self._index_ready = True
+        logger.info(f"Refreshed index: {len(self._index)} documents from {len(self.indexed_directories) + 1} directories")
 
     def retrieve(self, query: str, k: int = 5) -> List[str]:
         """Retrieve relevant documents for a query."""

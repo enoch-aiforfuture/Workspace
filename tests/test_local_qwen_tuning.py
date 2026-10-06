@@ -18,6 +18,21 @@ def local_endpoints(monkeypatch):
     )
 
 
+def test_local_qwen_pins_enable_thinking_to_think_flag(local_endpoints):
+    """A stale enable_thinking=true must not survive think=false.
+
+    mlx-vlm honors enable_thinking, not Ollama's think flag. setdefault left
+    the stale value in place and tool calls came back wrapped in <think>.
+    """
+    off = {"model": QWEN, "temperature": 0.7, "think": False, "enable_thinking": True}
+    llm_core._apply_local_generation_stability(off, LOCAL_URL, QWEN)
+    assert off["enable_thinking"] is False
+
+    on = {"model": QWEN, "think": True, "enable_thinking": False}
+    llm_core._apply_local_generation_stability(on, LOCAL_URL, QWEN)
+    assert on["enable_thinking"] is True
+
+
 def test_local_qwen_non_thinking_gets_model_card_sampling(local_endpoints):
     payload = {"model": QWEN, "temperature": 1.0, "think": False}
     llm_core._apply_local_generation_stability(payload, LOCAL_URL, QWEN)

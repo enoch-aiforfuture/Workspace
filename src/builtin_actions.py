@@ -15,6 +15,7 @@ from src.auth_helpers import owner_filter
 from core.platform_compat import IS_WINDOWS, find_bash
 from core.constants import internal_api_base
 from src.constants import DATA_DIR, DEEP_RESEARCH_DIR, TIDY_CALENDAR_STATE_FILE, EMAIL_URGENCY_CACHE_DIR, COOKBOOK_STATE_FILE
+from src.note_repeat import advance_recurring_due
 from src.interactive_gate import wait_for_interactive_quiet
 
 logger = logging.getLogger(__name__)
@@ -2101,12 +2102,17 @@ async def action_audit_skills(owner: str, **kwargs) -> Tuple[str, bool]:
 
 
 async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
-    """Background note-due scanner. Fires a reminder for any note whose
-    `due_date` falls in the current ±5-minute window and hasn't been pinged
-    within the last 25 minutes. Mirrors `action_ping_events` for calendar.
+    """Background note-due scanner.
 
-    State (`data/note_pings.json`): {note_id: iso_ts_of_last_ping}. Pruned
-    on each run by dropping entries for notes that are gone/archived/replied.
+    Fires a reminder for any note whose `due_date` falls in the current
+    ±90-second window and has not been pinged in the last 25 minutes.
+    Recurring notes then move `due_date` to the next future occurrence, so
+    email and ntfy reminders continue when no browser tab is open. A
+    recurring note already past the window is rolled forward without sending
+    the missed occurrence; if that next slot is inside this tick, it is sent.
+
+    State (`data/note_pings_<owner>.json`): {note_id: iso_ts_of_last_ping}.
+    Pruned on each run by dropping entries for notes that are gone.
     """
     try:
         import json as _json
@@ -2172,14 +2178,27 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
             reping_cutoff = now - _td(minutes=REPING_MIN)
             seen_ids = set()
             sent = []
+            due_advanced = False
 
             for n in notes:
                 seen_ids.add(n.id)
                 due = _parse_due(n.due_date)
                 if not due:
                     continue
-                # Inside the ±5min window?
-                if abs((due - now).total_seconds()) > window.total_seconds():
+                repeat = (getattr(n, "repeat", None) or "").strip() or "none"
+                recurring = repeat != "none"
+                # Missed recurring occurrence: roll forward so the series
+                # continues. If the next slot is inside this tick, send it.
+                if recurring and due < (now - window):
+                    next_due = advance_recurring_due(n.due_date, repeat, now=now)
+                    if not next_due or next_due == n.due_date:
+                        continue
+                    n.due_date = next_due
+                    due_advanced = True
+                    due = _parse_due(n.due_date)
+                    if not due or abs((due - now).total_seconds()) > window.total_seconds():
+                        continue
+                elif abs((due - now).total_seconds()) > window.total_seconds():
                     continue
                 # Recently pinged? Skip.
                 last = cache.get(n.id)
@@ -2221,6 +2240,11 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
                     )
                     cache[n.id] = now.isoformat()
                     sent.append(title)
+                    if recurring:
+                        next_due = advance_recurring_due(n.due_date, repeat, now=now)
+                        if next_due and next_due != n.due_date:
+                            n.due_date = next_due
+                            due_advanced = True
                 except Exception as e:
                     logger.warning(f"ping_notes: dispatch failed for {n.id}: {e}")
 
@@ -2232,6 +2256,12 @@ async def action_ping_notes(owner: str, **kwargs) -> Tuple[str, bool]:
                 STATE.write_text(_json.dumps(cache), encoding="utf-8")
             except Exception as e:
                 logger.warning(f"ping_notes: cache write failed: {e}")
+
+            if due_advanced:
+                try:
+                    db.commit()
+                except Exception as e:
+                    logger.warning(f"ping_notes: due_date update failed: {e}")
 
             if not sent:
                 raise TaskNoop(f"scanned {len(notes)} note(s), none due in ±{WINDOW_SEC}s")

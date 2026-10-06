@@ -738,7 +738,8 @@ class ScheduledTask(TimestampMixin, Base):
     task_type      = Column(String, default="llm")            # "llm" | "action"
     action         = Column(String, nullable=True)            # builtin action name (for task_type="action")
     schedule       = Column(String, nullable=True)            # "once", "daily", "weekly", "monthly"
-    scheduled_time = Column(String, nullable=True)            # "HH:MM" (24h, stored UTC)
+    scheduled_time = Column(String, nullable=True)            # "HH:MM" (UTC, or local to timezone)
+    timezone       = Column(String, nullable=True)            # IANA tz; scheduled_time is wall clock in it
     scheduled_day  = Column(Integer, nullable=True)           # day-of-week 0=Mon for weekly, day-of-month for monthly
     scheduled_date = Column(DateTime, nullable=True)          # exact datetime for "once"
     trigger_type   = Column(String, default="schedule")       # "schedule" | "event"
@@ -1783,7 +1784,21 @@ def _migrate_add_crew_member_id():
                 conn.commit()
                 logging.getLogger(__name__).info("Added crew_member_id column to scheduled_tasks")
     except Exception as e:
-        logging.getLogger(__name__).warning(f"crew_member_id migration: {e}")
+            logging.getLogger(__name__).warning(f"crew_member_id migration: {e}")
+
+
+def _migrate_add_task_timezone():
+    """Add timezone to scheduled_tasks so a daily time stays on the local clock."""
+    try:
+        with engine.connect() as conn:
+            cols = [r[1] for r in conn.execute(text("PRAGMA table_info(scheduled_tasks)"))]
+            if cols and "timezone" not in cols:
+                conn.execute(text("ALTER TABLE scheduled_tasks ADD COLUMN timezone TEXT"))
+                conn.commit()
+                logging.getLogger(__name__).info("Added timezone column to scheduled_tasks")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"scheduled_tasks timezone migration: {e}")
+
 
 def _migrate_add_assistant_columns():
     """Add is_default_assistant + timezone columns to crew_members for the personal-assistant feature."""
@@ -1869,6 +1884,10 @@ class CalendarEvent(TimestampMixin, Base):
     # that preserve the source TZID). False = legacy naive-local. Drives the
     # `Z`-suffix on serialization so the frontend interprets correctly.
     is_utc      = Column(Boolean, default=False, nullable=False)
+    # IANA zone of an imported TZID (e.g. "America/Los_Angeles"). Recurrence
+    # expands in this zone so BYDAY and the wall clock survive DST. NULL keeps
+    # the legacy behaviour: the stored naive clock is the recurrence clock.
+    timezone    = Column(String, nullable=True)
     rrule       = Column(String, default="")
     recurrence_exdates = Column(Text, default="")  # JSON list of skipped occurrence starts
     color       = Column(String, nullable=True)  # per-event color override
@@ -2132,12 +2151,14 @@ def init_db():
     _migrate_add_notifications_enabled()
     _migrate_drop_ping_notes_tasks()
     _migrate_add_crew_member_id()
+    _migrate_add_task_timezone()
     _migrate_add_assistant_columns()
     _migrate_add_email_smtp_security()
     _migrate_email_account_default_invariant()
     _migrate_seed_email_account()
     _migrate_add_calendar_metadata()
     _migrate_add_calendar_is_utc()
+    _migrate_add_calendar_event_timezone()
     _migrate_add_calendar_origin()
     _migrate_add_calendar_account_id()
     _migrate_add_caldav_sync_columns()
@@ -2239,14 +2260,17 @@ def _migrate_chat_messages_fts():
             END;
             """
         )
+        # message_id is UNINDEXED, so a correlated NOT EXISTS scans the whole
+        # FTS table once per chat row. NOT IN builds the id set once. The
+        # IS NOT NULL guard keeps a stray NULL id from making NOT IN unknown.
         conn.execute(
             f"""
             INSERT INTO chat_messages_fts(content, message_id, session_id, role)
             SELECT {fts_content_expr_cm}, cm.id, cm.session_id, cm.role
             FROM chat_messages cm
-            WHERE NOT EXISTS (
-                SELECT 1 FROM chat_messages_fts fts
-                WHERE fts.message_id = cm.id
+            WHERE cm.id NOT IN (
+                SELECT fts.message_id FROM chat_messages_fts fts
+                WHERE fts.message_id IS NOT NULL
             )
             """
         )
@@ -2537,6 +2561,29 @@ def _migrate_add_calendar_metadata():
         conn.commit()
     except Exception as e:
         logging.getLogger(__name__).warning(f"calendar_events migration failed: {e}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _migrate_add_calendar_event_timezone():
+    """Remember the source TZID so recurring imports expand in that zone."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(calendar_events)").fetchall()]
+        if columns and "timezone" not in columns:
+            conn.execute("ALTER TABLE calendar_events ADD COLUMN timezone TEXT")
+            conn.commit()
+            logging.getLogger(__name__).info("Migrated: added 'timezone' column to calendar_events")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"calendar_events timezone migration failed: {e}")
     finally:
         try:
             conn.close()

@@ -67,6 +67,10 @@ try { (function () {
     document.getElementById("tool-tasks-btn")?.click();
   }
 
+  function _browserTimeZone() {
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch (_) { return null; }
+  }
+
   const DAYS = [
     { k: "MO", l: "Mon", idx: 0 },
     { k: "TU", l: "Tue", idx: 1 },
@@ -216,42 +220,12 @@ try { (function () {
       let dur = (eh * 60 + em) - (sh * 60 + sm);
       if (dur <= 0) dur += 24 * 60;
 
-      // The backend stores scheduled_time as UTC. The user picks
-      // wall-clock LOCAL time. Without converting, "09:55" in a UTC+9
-      // timezone gets stored as 09:55 UTC = 18:55 local → next-run
-      // shows ~9 hours later instead of "in 5 min". Mirror what
-      // tasks.js does via its _localTimeToUtc helper.
-      const _localHHMMToUtc = (hhmm) => {
-        const [h, m] = hhmm.split(":").map(Number);
-        const d = new Date();
-        d.setHours(h, m, 0, 0);
-        return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
-      };
-      const startUtc = _localHHMMToUtc(startTime);
-      const [shUtc, smUtc] = startUtc.split(":").map(Number);
-
-      const allDays = days.length === 7;
+      // Store the picked hour as a local wall clock plus the browser IANA
+      // zone, matching the Tasks page. Cron hour/minute are local too:
+      // compute_next_run evaluates the expression in that zone. With no
+      // zone, buildCookbookScheduleFields falls back to a UTC clock.
+      const sched = buildCookbookScheduleFields(startTime, days, _browserTimeZone());
       const weekdaysOnly = days.length === 5 && ["MO","TU","WE","TH","FR"].every(d => days.includes(d));
-      const sched = {};
-      if (allDays) {
-        sched.schedule = "daily";
-        sched.scheduled_time = startUtc;
-      } else if (weekdaysOnly) {
-        sched.schedule = "cron";
-        sched.cron_expression = `${smUtc} ${shUtc} * * 1-5`;
-      } else if (days.length === 1) {
-        const dayIdx = DAYS.find(d => d.k === days[0]).idx;
-        sched.schedule = "weekly";
-        sched.scheduled_time = startUtc;
-        sched.scheduled_day = dayIdx;
-      } else {
-        const dayNum = days.map(k => {
-          const i = DAYS.find(d => d.k === k).idx;
-          return i === 6 ? 0 : i + 1;
-        });
-        sched.schedule = "cron";
-        sched.cron_expression = `${smUtc} ${shUtc} * * ${dayNum.join(",")}`;
-      }
 
       // Name: "Serve: <full model name>" — pulled from .memory-item-title
       // so it's the user's display name (e.g. "Qwen3.5-397B-A17B-AWQ")

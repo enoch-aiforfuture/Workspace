@@ -8,7 +8,7 @@ This page keeps the detailed install, deployment, troubleshooting, and configura
 
 ## Quick Start
 
-> **Branch note:** `dev` is the default branch and contains the latest development changes, but it may be unstable. For the more stable curated branch, use [`main`](https://github.com/enoch-aiforfuture/Workspace/tree/main).
+> **Branch note:** [`main`](https://github.com/enoch-aiforfuture/Workspace/tree/main) is the only branch. Clone it and open pull requests against it.
 
 Defaults work out of the box: clone, run, then configure models/search/email
 inside **Settings**. Only edit `.env` for deployment-level overrides like
@@ -19,7 +19,7 @@ On first setup, Workspace creates an admin account (`admin` unless
 For Docker installs, the same line is in `docker compose logs workspace`.
 Use that for the first login, then change it in **Settings**.
 
-Contributing? See [CONTRIBUTING.md](https://github.com/enoch-aiforfuture/Workspace/blob/dev/CONTRIBUTING.md) for setup, testing, and pull request guidelines.
+Contributing? See [CONTRIBUTING.md](https://github.com/enoch-aiforfuture/Workspace/blob/main/CONTRIBUTING.md) for setup, testing, and pull request guidelines.
 
 ### Docker (recommended)
 ```bash

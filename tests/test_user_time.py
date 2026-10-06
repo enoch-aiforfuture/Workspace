@@ -26,6 +26,8 @@ def test_current_datetime_prompt_uses_browser_timezone():
     assert "Australia/Brisbane, UTC+10:00" in prompt
     assert "Tomorrow is Tuesday, June 2, 2026 (2026-06-02)" in prompt
     assert "Do not ask for an exact date" in prompt
+    assert "pass scheduled_time as HH:MM in this user's local wall clock" in prompt
+    assert "scheduled_time is in UTC" not in prompt
 
 
 def test_iana_name_wins_when_offset_disagrees():
@@ -51,6 +53,7 @@ def test_offset_is_used_when_name_is_absent():
     assert "User local time is 7:16 PM" in prompt
     assert "UTC+10:00" in prompt
     assert "Australia/Brisbane" not in prompt
+    assert "scheduled_time is in UTC" in prompt
 
 
 def test_iana_name_is_used_when_offset_is_absent():
@@ -73,6 +76,7 @@ def test_invalid_name_falls_back_to_offset():
     assert "User local time is 7:16 PM" in prompt
     assert "UTC+10:00" in prompt
     assert "Not/AZone" not in prompt
+    assert "scheduled_time is in UTC" in prompt
 
 
 def test_timezone_name_is_sanitized_and_ephemeral():

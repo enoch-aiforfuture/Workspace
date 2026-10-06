@@ -370,6 +370,25 @@ async def do_manage_mcp(content: str, owner: Optional[str] = None) -> Dict:
 # Webhook management tool
 # ---------------------------------------------------------------------------
 
+def _encrypt_webhook_secret(secret: str) -> str:
+    """Store a signing secret the same way POST /api/webhooks does.
+
+    Delivery decrypts with the app API-key manager and signs
+    ``X-Workspace-Signature``. A plaintext column value only happens when that
+    manager is not available, matching the HTTP route's fallback.
+    """
+    manager = None
+    try:
+        import app as app_module
+        manager = getattr(app_module, "api_key_manager", None)
+    except Exception:
+        logger.debug("webhook secret encryption manager unavailable", exc_info=True)
+    encrypt = getattr(manager, "encrypt_api_key", None)
+    if callable(encrypt):
+        return encrypt(secret)
+    return secret
+
+
 async def do_manage_webhooks(content: str, owner: Optional[str] = None) -> Dict:
     """Manage webhooks: list, add, delete, enable, disable, test."""
     from core.database import SessionLocal
@@ -384,17 +403,25 @@ async def do_manage_webhooks(content: str, owner: Optional[str] = None) -> Dict:
         from core.database import Webhook
         if action == "list":
             hooks = db.query(Webhook).all()
-            items = [{"id": h.id, "name": h.name, "url": h.url,
-                       "events": h.events, "is_active": h.is_active} for h in hooks]
+            items = [{
+                "id": h.id,
+                "name": h.name,
+                "url": h.url,
+                "has_secret": bool(getattr(h, "secret", None)),
+                "events": h.events,
+                "is_active": h.is_active,
+            } for h in hooks]
             return {"response": f"{len(items)} webhooks", "webhooks": items, "exit_code": 0}
 
         elif action == "add":
             import uuid as _uuid
-            from datetime import datetime
             from src.webhook_manager import validate_events, validate_webhook_url
             name = args.get("name", "")
             url = args.get("url", "")
             events = args.get("events", "chat.completed")
+            if isinstance(events, list):
+                events = ",".join(str(item) for item in events if str(item).strip())
+            events = str(events or "chat.completed")
             if not url:
                 return {"error": "url is required", "exit_code": 1}
             try:
@@ -402,13 +429,27 @@ async def do_manage_webhooks(content: str, owner: Optional[str] = None) -> Dict:
                 events = validate_events(events)
             except ValueError as e:
                 return {"error": str(e), "exit_code": 1}
+            from core.database import utcnow_naive
+            from routes.webhook.webhook_routes import MAX_NAME_LEN, MAX_SECRET_LEN
+            display_name = str(name or url).strip()[:MAX_NAME_LEN]
+            if not display_name:
+                return {"error": "Webhook name is required", "exit_code": 1}
+            secret_raw = str(args.get("secret") or "").strip()[:MAX_SECRET_LEN]
+            stored_secret = _encrypt_webhook_secret(secret_raw) if secret_raw else None
             wid = str(_uuid.uuid4())[:8]
-            hook = Webhook(id=wid, name=name or url, url=url,
-                           events=events, is_active=True,
-                           created_at=datetime.utcnow(), updated_at=datetime.utcnow())
+            hook = Webhook(
+                id=wid, name=display_name, url=url,
+                secret=stored_secret, events=events, is_active=True,
+                created_at=utcnow_naive(), updated_at=utcnow_naive(),
+            )
             db.add(hook)
             db.commit()
-            return {"response": f"Added webhook '{name or url}'", "exit_code": 0}
+            return {
+                "response": f"Added webhook '{display_name}'",
+                "id": wid,
+                "has_secret": bool(stored_secret),
+                "exit_code": 0,
+            }
 
         elif action == "delete":
             wid = args.get("webhook_id", "")
@@ -442,9 +483,44 @@ async def do_manage_webhooks(content: str, owner: Optional[str] = None) -> Dict:
 # API token management tool
 # ---------------------------------------------------------------------------
 
+def _invalidate_api_token_cache() -> None:
+    """Mark the auth middleware token map stale after a create or delete.
+
+    Bearer auth only accepts tokens that are already in this cache. The HTTP
+    routes invalidate it from the request; the agent tool has no request, so
+    it reaches the same hook on the running app. Missing the hook (tests,
+    import before startup) must not fail the tool call — the row is already
+    committed and the next process start rebuilds the cache.
+    """
+    try:
+        import app as app_module
+    except Exception:
+        logger.debug("API token cache invalidation skipped", exc_info=True)
+        return
+    application = getattr(app_module, "app", None)
+    invalidator = getattr(getattr(application, "state", None), "invalidate_token_cache", None)
+    if not callable(invalidator):
+        return
+    try:
+        invalidator()
+    except Exception:
+        logger.debug("API token cache invalidation failed", exc_info=True)
+
+
+def _token_scope_list(token) -> list:
+    raw = getattr(token, "scopes", None) or ""
+    if isinstance(raw, list):
+        return [str(s).strip() for s in raw if str(s).strip()]
+    return [s.strip() for s in str(raw).split(",") if s.strip()]
+
+
 async def do_manage_tokens(content: str, owner: Optional[str] = None) -> Dict:
-    """Manage API tokens: list, create, delete."""
-    from core.database import SessionLocal, ApiToken
+    """Manage API tokens: list, create, delete.
+
+    Create matches ``POST /api/tokens``: ``wsp_`` prefix, owner, normalized
+    scopes, and an auth-cache invalidation. Auth ignores any other shape.
+    """
+    from core.database import SessionLocal, ApiToken, utcnow_naive
     try:
         args = _parse_tool_args(content)
     except ValueError:
@@ -455,32 +531,77 @@ async def do_manage_tokens(content: str, owner: Optional[str] = None) -> Dict:
     try:
         if action == "list":
             tokens = db.query(ApiToken).all()
-            items = [{"id": t.id, "name": t.name, "token_prefix": t.token_prefix + "...",
-                       "is_active": t.is_active} for t in tokens]
+            items = [{
+                "id": t.id,
+                "name": t.name,
+                "owner": getattr(t, "owner", None),
+                "token_prefix": (t.token_prefix or "") + "...",
+                "scopes": _token_scope_list(t),
+                "is_active": t.is_active,
+            } for t in tokens]
             return {"response": f"{len(items)} API tokens", "tokens": items, "exit_code": 0}
 
         elif action == "create":
             import uuid as _uuid, secrets, bcrypt
-            from datetime import datetime
-            name = args.get("name", "API Token")
-            raw_token = secrets.token_urlsafe(32)
+            from fastapi import HTTPException
+            from routes.api_token_routes import MAX_NAME_LEN, _normalize_scopes
+
+            owner_name = (owner or "").strip()
+            if not owner_name:
+                return {
+                    "error": "manage_tokens: owner is required to create a usable API token",
+                    "exit_code": 1,
+                }
+            name = str(args.get("name") or "API Token").strip()[:MAX_NAME_LEN]
+            if not name:
+                return {"error": "Token name is required", "exit_code": 1}
+            try:
+                scope_list = _normalize_scopes(args.get("scopes"), args.get("profile"))
+            except HTTPException as exc:
+                detail = exc.detail if isinstance(getattr(exc, "detail", None), str) else "Invalid token scopes"
+                return {"error": detail, "exit_code": 1}
+
+            raw_token = "wsp_" + secrets.token_urlsafe(32)
             token_hash = bcrypt.hashpw(raw_token.encode(), bcrypt.gensalt()).decode()
             tid = str(_uuid.uuid4())[:8]
-            t = ApiToken(id=tid, name=name, token_hash=token_hash,
-                         token_prefix=raw_token[:8], is_active=True,
-                         created_at=datetime.utcnow(), updated_at=datetime.utcnow())
+            t = ApiToken(
+                id=tid,
+                owner=owner_name,
+                name=name,
+                token_hash=token_hash,
+                token_prefix=raw_token[:8],
+                scopes=",".join(scope_list),
+                is_active=True,
+                created_at=utcnow_naive(),
+                updated_at=utcnow_naive(),
+            )
             db.add(t)
             db.commit()
-            return {"response": f"Created token '{name}'", "token": raw_token, "exit_code": 0}
+            _invalidate_api_token_cache()
+            return {
+                "response": f"Created token '{name}'",
+                "id": tid,
+                "token": raw_token,
+                "token_prefix": raw_token[:8],
+                "owner": owner_name,
+                "scopes": scope_list,
+                "exit_code": 0,
+            }
 
         elif action == "delete":
             tid = args.get("token_id", "")
             t = db.query(ApiToken).filter(ApiToken.id == tid).first()
             if not t:
                 return {"error": f"Token {tid} not found", "exit_code": 1}
+            token_owner = getattr(t, "owner", None)
+            # Unowned rows are the pre-fix tokens auth already ignores. Let the
+            # caller remove those. A token stamped to someone else stays put.
+            if owner and token_owner and token_owner != owner:
+                return {"error": "Not your token", "exit_code": 1}
             name = t.name
             db.delete(t)
             db.commit()
+            _invalidate_api_token_cache()
             return {"response": f"Deleted token '{name}'", "exit_code": 0}
 
         else:

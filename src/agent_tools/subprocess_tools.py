@@ -26,7 +26,13 @@ async def _create_bash_subprocess(command: str, **kwargs):
     has found Git Bash.  Pass the selected workspace as a structural ``cwd``
     argument; Git Bash inherits that native Windows directory and exposes it
     using its normal ``/c/...`` representation.
+
+    Stdin is ``DEVNULL`` unless the caller sets it. The server's stdin is not
+    a user terminal; a child that inherits it (``cat``, ``input()``, or a
+    Windows ``cmd`` that waits on redirected arguments) blocks until the
+    one-hour tool timeout.
     """
+    kwargs.setdefault("stdin", asyncio.subprocess.DEVNULL)
     if IS_WINDOWS:
         bash = find_bash()
         if not bash:
@@ -363,6 +369,7 @@ class PythonTool:
         _subproc_env = ctx.get("subproc_env")
         proc = await asyncio.create_subprocess_exec(
             (sys.executable or "python"), "-I", "-c", content,
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=_subproc_env,

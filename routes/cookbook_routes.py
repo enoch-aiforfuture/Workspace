@@ -60,6 +60,7 @@ from routes.cookbook_helpers import (
     _user_shell_path_bootstrap, _venv_safe_local_pip_install_cmd,
     _append_pip_install_runner_lines, _pip_install_command_without_break_system_packages,
     _normalize_llama_cpp_python_cache_types,
+    _normalize_llama_server_reasoning,
     ModelDownloadRequest, ServeRequest,
 )
 
@@ -1989,6 +1990,7 @@ def setup_cookbook_routes() -> APIRouter:
             # downstream `"engine" in req.cmd` checks cannot raise TypeError.
             req.cmd = _validate_serve_cmd(req.cmd) or ""
         req.cmd = _normalize_llama_cpp_python_cache_types(req.cmd) or ""
+        req.cmd = _normalize_llama_server_reasoning(req.cmd, req.repo_id) or ""
         req.cmd = _normalize_minimax_m3_vllm_cmd(req.cmd)
         req.cmd = _normalize_deepseek_v4_sglang_cmd(req.cmd)
         req.cmd = _venv_safe_local_pip_install_cmd(

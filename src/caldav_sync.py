@@ -151,6 +151,40 @@ def _stable_cal_id(remote_url: str, owner: str = "", account_id: str = "") -> st
     return f"caldav-{h}"
 
 
+def _source_tzid(prop) -> str | None:
+    """IANA zone from a DTSTART/DTEND property, or None.
+
+    Prefers the TZID parameter, then a tzinfo zoneinfo can name. A floating
+    time or an unrecognized zone returns None so recurrence keeps the legacy
+    naive clock.
+    """
+    if prop is None:
+        return None
+    name = None
+    params = getattr(prop, "params", None)
+    if params is not None:
+        try:
+            raw = params.get("TZID")
+        except Exception:
+            raw = None
+        if raw:
+            name = str(raw)
+    if not name:
+        dt = getattr(prop, "dt", None)
+        tzinfo = getattr(dt, "tzinfo", None)
+        named = getattr(tzinfo, "key", None) or getattr(tzinfo, "zone", None)
+        if named:
+            name = str(named)
+    if not name:
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+        ZoneInfo(name)
+    except Exception:
+        return None
+    return name
+
+
 def _to_utc_naive(dt):
     """CalDAV datetimes can be tz-aware (with a TZID) or naive. The DB
     column is naive but we set is_utc=True so the serializer adds Z.
@@ -405,6 +439,7 @@ def _sync_blocking(owner: str, url: str, username: str, password: str, account_i
                                 and isinstance(dtstart_p.dt, datetime)
                                 and dtstart_p.dt.tzinfo is not None
                             )
+                            row_tzid = _source_tzid(dtstart_p) if row_is_utc else None
 
                             summary = str(comp.get("summary", ""))
                             description = str(comp.get("description", ""))
@@ -428,6 +463,7 @@ def _sync_blocking(owner: str, url: str, username: str, password: str, account_i
                                 existing.dtend = end_dt
                                 existing.all_day = all_day
                                 existing.is_utc = row_is_utc
+                                existing.timezone = row_tzid
                                 existing.rrule = rrule
                                 existing.origin = "caldav"
                                 existing.remote_href = str(getattr(obj, "url", "") or "") or None
@@ -444,6 +480,7 @@ def _sync_blocking(owner: str, url: str, username: str, password: str, account_i
                                     dtend=end_dt,
                                     all_day=all_day,
                                     is_utc=row_is_utc,
+                                    timezone=row_tzid,
                                     rrule=rrule,
                                     origin="caldav",
                                     remote_href=str(getattr(obj, "url", "") or "") or None,
@@ -502,6 +539,7 @@ def _event_payload(ev) -> dict:
         "dtend": ev.dtend,
         "all_day": ev.all_day,
         "is_utc": ev.is_utc,
+        "timezone": getattr(ev, "timezone", None) or "",
         "rrule": ev.rrule or "",
         "recurrence_exdates": json.loads(ev.recurrence_exdates or "[]") if getattr(ev, "recurrence_exdates", "") else [],
     }

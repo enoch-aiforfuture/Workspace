@@ -59,11 +59,47 @@ def _get_public_url(url, headers, timeout, max_redirects=5, max_bytes=None):
     )
 
 
-# PDF extraction (optional dependency)
+# pdfminer is optional. pypdf is a required dependency and is what document
+# upload already uses, so a missing pdfminer must not drop fetched PDF text.
 try:
     from pdfminer.high_level import extract_text as pdf_extract_text
 except ImportError:
     pdf_extract_text = None  # type: ignore
+
+
+def _extract_pdf_text(data: bytes) -> str:
+    """Return text from a PDF body.
+
+    Prefer pdfminer.six when it is installed. Fall back to pypdf when it is
+    missing, raises, or returns no text. Default and Docker installs do not
+    ship pdfminer, and an empty string here becomes "Failed to extract PDF text"
+    for web_fetch and deep research.
+    """
+    text = ""
+    if pdf_extract_text is not None:
+        try:
+            text = pdf_extract_text(io.BytesIO(data)) or ""
+        except Exception as e:
+            logger.warning("pdfminer extraction failed; trying pypdf: %s", e)
+            text = ""
+    if text.strip():
+        return text
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        logger.error("pypdf is not installed; cannot extract PDF text.")
+        return ""
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        parts = []
+        for page in reader.pages:
+            page_text = (page.extract_text() or "").strip()
+            if page_text:
+                parts.append(page_text)
+        return "\n\n".join(parts)
+    except Exception as e:
+        logger.warning("pypdf extraction failed: %s", e)
+        return ""
 
 
 # ----------------------------------------------------------------------
@@ -262,16 +298,7 @@ def fetch_webpage_content(url: str, timeout: int = 5, retry_attempt: int = 0,
                 + (f" (size {_declared:,} bytes)" if _declared else "")
                 + "; retry with a larger budget if it fits under the hard cap",
             )
-        if pdf_extract_text is None:
-            logger.error("pdfminer.six is not installed; cannot extract PDF text.")
-            pdf_text = ""
-        else:
-            try:
-                pdf_bytes = io.BytesIO(response.content)
-                pdf_text = pdf_extract_text(pdf_bytes)
-            except Exception as e:
-                logger.warning(f"PDF extraction failed for {url}: {e}")
-                pdf_text = ""
+        pdf_text = _extract_pdf_text(response.content)
         result = {
             "url": url,
             "title": os.path.basename(url),

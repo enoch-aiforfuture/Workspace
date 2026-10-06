@@ -271,11 +271,54 @@ def _skill_dump(sk) -> Dict:
 # Task management tool
 # ---------------------------------------------------------------------------
 
+def _valid_iana_timezone(name) -> Optional[str]:
+    """Return a ZoneInfo-valid IANA name, or None when blank or unknown."""
+    if name is None:
+        return None
+    cleaned = str(name).strip()
+    if not cleaned:
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+        ZoneInfo(cleaned)
+    except Exception:
+        return None
+    return cleaned
+
+
+def _explicit_task_timezone(args: Dict):
+    """Resolve an optional manage_tasks ``timezone`` argument.
+
+    Returns ``(timezone_or_none, error_or_none, was_provided)``. An empty
+    string is an explicit clear. An unknown name is an error. Omitting the
+    key leaves the caller to apply the default.
+    """
+    if "timezone" not in args or args.get("timezone") is None:
+        return None, None, False
+    raw = args.get("timezone")
+    if isinstance(raw, str) and not raw.strip():
+        return None, None, True
+    tz = _valid_iana_timezone(raw)
+    if tz is None:
+        return None, f"Unknown timezone: {raw}", True
+    return tz, None, True
+
+
+def _default_task_timezone() -> Optional[str]:
+    """IANA zone from the chat request, when the browser sent a valid name.
+
+    A fixed UTC offset is not a zone: it would drift across DST. When no
+    IANA name is known, scheduled_time stays a UTC wall clock.
+    """
+    from src.user_time import get_user_tz_name
+    return _valid_iana_timezone(get_user_tz_name())
+
+
 async def do_manage_tasks(content: str, owner: Optional[str] = None) -> Dict:
     """Handle manage_tasks tool calls: CRUD on scheduled tasks."""
     import uuid as _uuid
     from core.database import SessionLocal, ScheduledTask
-    from src.task_scheduler import compute_next_run
+    from src.task_scheduler import compute_next_run, _resolve_task_timezone
 
     try:
         args = _parse_tool_args(content)
@@ -322,7 +365,8 @@ async def do_manage_tasks(content: str, owner: Optional[str] = None) -> Dict:
                 if t.schedule:
                     bits.append(str(t.schedule))
                 if t.scheduled_time:
-                    bits.append(str(t.scheduled_time))
+                    zone = getattr(t, "timezone", None)
+                    bits.append(f"{t.scheduled_time} {zone}" if zone else f"{t.scheduled_time} UTC")
                 if t.next_run:
                     bits.append(f"next {t.next_run.isoformat()}Z")
                 detail = ", ".join(bits)
@@ -338,6 +382,15 @@ async def do_manage_tasks(content: str, owner: Optional[str] = None) -> Dict:
             if task_type == "action" and not args.get("action_name"):
                 return {"error": "action_name is required for action tasks", "exit_code": 1}
 
+            # scheduled_time is a local wall clock when an IANA zone is known
+            # (explicit argument, else the browser zone). Otherwise it stays UTC.
+            task_tz = None
+            explicit_tz, tz_err, tz_provided = _explicit_task_timezone(args)
+            if tz_err:
+                return {"error": tz_err, "exit_code": 1}
+            if trigger_type == "schedule":
+                task_tz = explicit_tz if tz_provided else _default_task_timezone()
+
             # Compute next_run for schedule triggers
             next_run = None
             if trigger_type == "schedule":
@@ -345,6 +398,7 @@ async def do_manage_tasks(content: str, owner: Optional[str] = None) -> Dict:
                 next_run = compute_next_run(
                     schedule, args.get("scheduled_time", "09:00"),
                     args.get("scheduled_day"),
+                    tz_name=task_tz,
                 )
 
             task_id = str(_uuid.uuid4())
@@ -361,6 +415,7 @@ async def do_manage_tasks(content: str, owner: Optional[str] = None) -> Dict:
                 action=args.get("action_name"),
                 schedule=args.get("schedule") if trigger_type == "schedule" else None,
                 scheduled_time=args.get("scheduled_time", "09:00") if trigger_type == "schedule" else None,
+                timezone=task_tz,
                 scheduled_day=args.get("scheduled_day"),
                 trigger_type=trigger_type,
                 trigger_event=args.get("trigger_event"),
@@ -415,10 +470,29 @@ async def do_manage_tasks(content: str, owner: Optional[str] = None) -> Dict:
                     setattr(task, field, args[field])
                     changed.append(field)
                     schedule_changed = True
+            # scheduled_time is local wall clock in task.timezone, matching the
+            # Tasks page. Keep a stored zone when the time changes. An explicit
+            # timezone argument overrides it; an empty string clears it back to
+            # the UTC clock. A legacy task with no zone picks up the browser
+            # IANA name so a local HH:MM is not stored as UTC.
+            explicit_tz, tz_err, tz_provided = _explicit_task_timezone(args)
+            if tz_err:
+                return {"error": tz_err, "exit_code": 1}
+            if tz_provided:
+                task.timezone = explicit_tz
+                changed.append("timezone")
+                schedule_changed = True
+            elif args.get("scheduled_time") is not None and not (getattr(task, "timezone", None) or "").strip():
+                inferred = _default_task_timezone()
+                if inferred:
+                    task.timezone = inferred
+                    changed.append("timezone")
+                    schedule_changed = True
 
             if schedule_changed and (task.trigger_type or "schedule") == "schedule":
                 task.next_run = compute_next_run(
                     task.schedule, task.scheduled_time, task.scheduled_day,
+                    tz_name=_resolve_task_timezone(db, task),
                 )
 
             db.commit()
@@ -455,6 +529,7 @@ async def do_manage_tasks(content: str, owner: Optional[str] = None) -> Dict:
                 if (task.trigger_type or "schedule") == "schedule":
                     task.next_run = compute_next_run(
                         task.schedule, task.scheduled_time, task.scheduled_day,
+                        tz_name=_resolve_task_timezone(db, task),
                     )
             db.commit()
             return {"response": f"Task '{task.name}' {action}d", "exit_code": 0}

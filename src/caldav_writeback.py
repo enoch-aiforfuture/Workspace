@@ -18,7 +18,7 @@ network.
 
 import asyncio
 import logging
-from datetime import timezone
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +54,21 @@ def build_event_ical(ev: dict) -> str:
 
     dtstart = ev["dtstart"]
     dtend = ev["dtend"]
+    zone = None
+    zone_name = (ev.get("timezone") or "").strip()
+    if zone_name and ev.get("is_utc") and not ev.get("all_day"):
+        try:
+            from zoneinfo import ZoneInfo
+            zone = ZoneInfo(zone_name)
+        except Exception:
+            zone = None
     if ev.get("all_day"):
         ve.add("dtstart", dtstart.date())
         ve.add("dtend", dtend.date())
+    elif zone is not None:
+        # Keep the source TZID so the next pull expands BYDAY in that zone.
+        ve.add("dtstart", dtstart.replace(tzinfo=timezone.utc).astimezone(zone))
+        ve.add("dtend", dtend.replace(tzinfo=timezone.utc).astimezone(zone))
     elif ev.get("is_utc"):
         # Stored as naive-UTC instants — re-attach UTC so the server gets a Z time.
         ve.add("dtstart", dtstart.replace(tzinfo=timezone.utc))
@@ -77,7 +89,12 @@ def build_event_ical(ev: dict) -> str:
                 ve.add("exdate", datetime.strptime(exdate[:10], "%Y-%m-%d").date())
             else:
                 dt = datetime.strptime(exdate[:16], "%Y-%m-%dT%H:%M")
-                ve.add("exdate", dt.replace(tzinfo=timezone.utc) if ev.get("is_utc") else dt)
+                if zone is not None:
+                    ve.add("exdate", dt.replace(tzinfo=timezone.utc).astimezone(zone))
+                elif ev.get("is_utc"):
+                    ve.add("exdate", dt.replace(tzinfo=timezone.utc))
+                else:
+                    ve.add("exdate", dt)
         except Exception:
             logger.debug("CalDAV write-back: skipping unparseable exdate %r", exdate)
 
