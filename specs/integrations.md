@@ -189,7 +189,7 @@ The integration audit also ran the targeted venv subset covering those areas wit
 - Codex Cookbook scopes need continued Settings, route-check, and `ALLOWED_SCOPES` regression coverage.
 - Generic integration HTTP CRUD/test routes, `execute_api_call()` auth modes, response shaping, and frontend Settings/Admin flows need direct coverage.
 - `do_manage_tokens()` matches `/api/tokens` for the `wsp_` prefix, owner, normalized scopes, and auth-cache invalidation. Delete refuses a token owned by someone else and still removes legacy rows with no owner.
-- `do_manage_webhooks()` bypasses route behavior and does not cover signing-secret parity.
+- `do_manage_webhooks()` validates URLs and events like `POST /api/webhooks`, encrypts an optional signing secret with the API-key manager, and lists `has_secret` without returning the secret.
 - Companion read endpoints should either require `chat` scope or be documented as an explicit scope-policy exception.
 - Decide whether webhook secret plaintext fallback should remain accepted when the API key manager is unavailable.
 - Decide whether generic integration base URLs should stay LAN-capable by default or make `INTEGRATION_API_BLOCK_PRIVATE_IPS=true` the default.

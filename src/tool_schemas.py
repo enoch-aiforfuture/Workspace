@@ -780,7 +780,8 @@ FUNCTION_TOOL_SCHEMAS = [
                     "webhook_id": {"type": "string", "description": "Webhook ID (for delete/enable/disable)"},
                     "name": {"type": "string", "description": "Webhook name (for add)"},
                     "url": {"type": "string", "description": "Webhook URL (for add)"},
-                    "events": {"type": "string", "description": "Comma-separated event names (for add)"}
+                    "secret": {"type": "string", "description": "HMAC signing secret (for add). Stored encrypted. Deliveries send X-Workspace-Signature. Never echoed back."},
+                    "events": {"type": "string", "description": "Comma-separated event names (for add): session.created, chat.completed, chat.message"}
                 },
                 "required": ["action"]
             }

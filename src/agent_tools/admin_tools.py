@@ -370,6 +370,25 @@ async def do_manage_mcp(content: str, owner: Optional[str] = None) -> Dict:
 # Webhook management tool
 # ---------------------------------------------------------------------------
 
+def _encrypt_webhook_secret(secret: str) -> str:
+    """Store a signing secret the same way POST /api/webhooks does.
+
+    Delivery decrypts with the app API-key manager and signs
+    ``X-Workspace-Signature``. A plaintext column value only happens when that
+    manager is not available, matching the HTTP route's fallback.
+    """
+    manager = None
+    try:
+        import app as app_module
+        manager = getattr(app_module, "api_key_manager", None)
+    except Exception:
+        logger.debug("webhook secret encryption manager unavailable", exc_info=True)
+    encrypt = getattr(manager, "encrypt_api_key", None)
+    if callable(encrypt):
+        return encrypt(secret)
+    return secret
+
+
 async def do_manage_webhooks(content: str, owner: Optional[str] = None) -> Dict:
     """Manage webhooks: list, add, delete, enable, disable, test."""
     from core.database import SessionLocal
@@ -384,17 +403,25 @@ async def do_manage_webhooks(content: str, owner: Optional[str] = None) -> Dict:
         from core.database import Webhook
         if action == "list":
             hooks = db.query(Webhook).all()
-            items = [{"id": h.id, "name": h.name, "url": h.url,
-                       "events": h.events, "is_active": h.is_active} for h in hooks]
+            items = [{
+                "id": h.id,
+                "name": h.name,
+                "url": h.url,
+                "has_secret": bool(getattr(h, "secret", None)),
+                "events": h.events,
+                "is_active": h.is_active,
+            } for h in hooks]
             return {"response": f"{len(items)} webhooks", "webhooks": items, "exit_code": 0}
 
         elif action == "add":
             import uuid as _uuid
-            from datetime import datetime
             from src.webhook_manager import validate_events, validate_webhook_url
             name = args.get("name", "")
             url = args.get("url", "")
             events = args.get("events", "chat.completed")
+            if isinstance(events, list):
+                events = ",".join(str(item) for item in events if str(item).strip())
+            events = str(events or "chat.completed")
             if not url:
                 return {"error": "url is required", "exit_code": 1}
             try:
@@ -402,13 +429,27 @@ async def do_manage_webhooks(content: str, owner: Optional[str] = None) -> Dict:
                 events = validate_events(events)
             except ValueError as e:
                 return {"error": str(e), "exit_code": 1}
+            from core.database import utcnow_naive
+            from routes.webhook.webhook_routes import MAX_NAME_LEN, MAX_SECRET_LEN
+            display_name = str(name or url).strip()[:MAX_NAME_LEN]
+            if not display_name:
+                return {"error": "Webhook name is required", "exit_code": 1}
+            secret_raw = str(args.get("secret") or "").strip()[:MAX_SECRET_LEN]
+            stored_secret = _encrypt_webhook_secret(secret_raw) if secret_raw else None
             wid = str(_uuid.uuid4())[:8]
-            hook = Webhook(id=wid, name=name or url, url=url,
-                           events=events, is_active=True,
-                           created_at=datetime.utcnow(), updated_at=datetime.utcnow())
+            hook = Webhook(
+                id=wid, name=display_name, url=url,
+                secret=stored_secret, events=events, is_active=True,
+                created_at=utcnow_naive(), updated_at=utcnow_naive(),
+            )
             db.add(hook)
             db.commit()
-            return {"response": f"Added webhook '{name or url}'", "exit_code": 0}
+            return {
+                "response": f"Added webhook '{display_name}'",
+                "id": wid,
+                "has_secret": bool(stored_secret),
+                "exit_code": 0,
+            }
 
         elif action == "delete":
             wid = args.get("webhook_id", "")

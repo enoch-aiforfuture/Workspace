@@ -74,8 +74,8 @@ These are open, acknowledged, and contributor help is welcome:
 
 1. **No shell/filesystem sandbox.** The agent `bash` and `read_file`/`write_file` tools run as the app process user with no network egress filtering or filesystem confinement. A successful prompt-injection reaching a shell-enabled admin session can make outbound requests to internal services. See #1058 for the sandbox proposal.
 
-2. **SSRF via `/api/v1/chat` `base_url` parameter.** A chat-scoped API token can supply an arbitrary `base_url`; the server forwards the LLM request to that host without validating the scheme or address. PR #1039 fixes this.
+2. **`/api/v1/chat` direct `base_url` is public-only.** A token-supplied `base_url` is rejected unless `validate_public_http_url` accepts it as a public HTTP(S) URL. Admin-configured endpoints are a separate path and may stay on a private address.
 
 3. **`src/search/` partial consolidation.** `src.search.core` and `src.search.providers` correctly alias `services.search` via `sys.modules` replacement. `analytics`, `cache`, `content`, `query`, and `ranking` are still independent copies that can drift. The SSRF regression tests in `tests/test_webhook_ssrf_resilience.py` test `src.webhook_manager` directly (separate from search), so the safety net there is intact. See #1058.
 
-4. **Token scopes are coarse.** There is no way to grant a session a subset of the owning user's privileges. Companion/mobile tokens carry either `chat` or `admin` scope with no per-capability granularity.
+4. **Token scopes do not subdivide an admin session.** API tokens can be limited to `chat`, todos, documents, email, calendar, memory, and cookbook scopes (`routes/api_token_routes.py`). There is no `admin` scope. Companion pairing mints `chat` only. A cookie session is still all-or-nothing for the tools that user is allowed to run.
