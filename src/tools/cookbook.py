@@ -446,28 +446,6 @@ def _cookbook_engine_from_model_info(repo_id: str, info: Optional[Dict[str, Any]
     return "vllm"
 
 
-# llama.cpp reasoning models (Qwen3, QwQ, DeepSeek-R1, Magistral) put the
-# whole reply in reasoning_content and return empty content unless the server
-# is started with reasoning disabled. Keep this narrower than the chat-side
-# thinking list: Gemma and Mistral names are not this llama-server failure.
-_LLAMA_REASONING_MARKERS = (
-    "qwen3",
-    "qwq",
-    "deepseek-r1",
-    "deepseek-reasoner",
-    "magistral",
-)
-
-
-def _llama_reasoning_model(repo_id: str, info: Optional[Dict[str, Any]] = None) -> bool:
-    """True when the repo id or a GGUF filename looks like a llama.cpp reasoning model."""
-    parts = [(repo_id or "").lower()]
-    for sibling in (info or {}).get("siblings") or []:
-        parts.append(str(sibling).lower())
-    blob = " ".join(parts)
-    return any(marker in blob for marker in _LLAMA_REASONING_MARKERS)
-
-
 def _cookbook_default_launch_cmd(repo_id: str, engine: str, *, port: int = 8000, info: Optional[Dict[str, Any]] = None) -> str:
     """Build a simple first-attempt command for a selected engine."""
     engine = (engine or "vllm").lower()
@@ -488,9 +466,8 @@ def _cookbook_default_launch_cmd(repo_id: str, engine: str, *, port: int = 8000,
             cmd = f"llama-server -hf {repo_id} --hf-file {siblings[0]} --host 0.0.0.0 --port {port}"
         else:
             cmd = f"llama-server -hf {repo_id} --host 0.0.0.0 --port {port}"
-        if _llama_reasoning_model(repo_id, info):
-            cmd += " --reasoning off"
-        return cmd
+        from routes.cookbook_helpers import _normalize_llama_server_reasoning
+        return _normalize_llama_server_reasoning(cmd, repo_id) or cmd
     return f"vllm serve {repo_id} --host 0.0.0.0 --port {port}"
 
 

@@ -714,6 +714,52 @@ def _normalize_llama_cpp_python_cache_types(cmd: str | None) -> str | None:
     return _LLAMA_CPP_PYTHON_TYPE_FLAG_RE.sub(repl, cmd)
 
 
+# llama.cpp reasoning GGUFs spend the reply in reasoning_content unless the
+# server is started with reasoning disabled. Narrower than the chat thinking
+# list: Gemma and Mistral names are not this llama-server failure.
+_LLAMA_REASONING_MARKERS = (
+    "qwen3",
+    "qwq",
+    "deepseek-r1",
+    "deepseek-reasoner",
+    "magistral",
+)
+_LLAMA_REASONING_FLAG_RE = re.compile(r"(?:^|\s)--reasoning(?:\s|=|$)")
+
+
+def _normalize_llama_server_reasoning(cmd: str | None, repo_id: str | None = None) -> str | None:
+    """Append ``--reasoning off`` when this app is about to launch llama-server.
+
+    Cookbook-generated commands, the serve form, saved presets, agent
+    ``cmd`` strings, and retries all pass through ``/api/model/serve``, so
+    this covers hand-written commands as well as the default builder. An
+    explicit ``--reasoning`` value is left as the operator wrote it.
+
+    Not changed here:
+    - a llama-server process that is already running (its argv is fixed;
+      the flag is applied the next time this app launches or retries it)
+    - a process started outside Cookbook and only seen by the process scan
+    - ``python -m llama_cpp.server``, which does not accept this flag
+    """
+    if not cmd or "llama-server" not in cmd.lower():
+        return cmd
+    if _LLAMA_REASONING_FLAG_RE.search(cmd):
+        return cmd
+    try:
+        parts = shlex.split(cmd)
+    except ValueError:
+        return cmd
+    env_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+    first = next((part for part in parts if not env_re.match(part)), "")
+    binary = os.path.basename(first).lower()
+    if binary not in {"llama-server", "llama-server.exe"}:
+        return cmd
+    blob = f"{cmd} {repo_id or ''}".lower()
+    if not any(marker in blob for marker in _LLAMA_REASONING_MARKERS):
+        return cmd
+    return cmd.rstrip() + " --reasoning off"
+
+
 def _check_serve_binary(seg: str) -> None:
     """Validate that a single command segment starts with an allowlisted binary
     (after skipping leading env-var assignments like `CUDA_VISIBLE_DEVICES=0`)."""
