@@ -179,6 +179,7 @@ def setup_assistant_routes(task_scheduler) -> APIRouter:
                 crew_db.model = payload.model or None
             if payload.endpoint_url is not None:
                 crew_db.endpoint_url = payload.endpoint_url or None
+            old_crew_tz = crew_db.timezone
             if payload.timezone is not None:
                 crew_db.timezone = payload.timezone or None
 
@@ -230,7 +231,7 @@ def setup_assistant_routes(task_scheduler) -> APIRouter:
                             task.scheduled_date,
                             after=now_utc,
                             cron_expression=task.cron_expression,
-                            tz_name=tz_name,
+                            tz_name=task.timezone or tz_name,
                         )
                     task.updated_at = datetime.utcnow()
 
@@ -238,16 +239,22 @@ def setup_assistant_routes(task_scheduler) -> APIRouter:
             # the user didn't touch the time fields.
             if payload.timezone is not None:
                 now_utc = datetime.utcnow()
-                tz_name = crew_db.timezone or None
+                new_tz = crew_db.timezone or None
                 tasks = db.query(ScheduledTask).filter(
                     ScheduledTask.owner == owner,
                     ScheduledTask.crew_member_id == crew_db.id,
                 ).all()
                 for t in tasks:
-                    if t.schedule and t.scheduled_time:
+                    # Tasks that stored their own zone keep that wall clock.
+                    # Tasks with no zone, or still carrying the previous crew
+                    # zone, follow the crew member.
+                    if not (t.timezone or "") or t.timezone == old_crew_tz:
+                        t.timezone = new_tz
+                    if t.schedule and (t.scheduled_time or t.cron_expression):
                         t.next_run = compute_next_run(
                             t.schedule, t.scheduled_time, t.scheduled_day, t.scheduled_date,
-                            after=now_utc, cron_expression=t.cron_expression, tz_name=tz_name,
+                            after=now_utc, cron_expression=t.cron_expression,
+                            tz_name=t.timezone or None,
                         )
 
             db.commit()

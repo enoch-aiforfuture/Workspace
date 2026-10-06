@@ -180,8 +180,8 @@ def current_datetime_context_message_for_tz(
     Timezone resolution:
     * ``iana_tz_name`` is a valid IANA name (e.g. ``"Europe/Berlin"``) → uses that zone.
     * ``iana_tz_name`` is ``None`` OR resolves to an invalid zone → falls back to UTC.
-      This matches the existing scheduler behaviour: tasks without a linked crew
-      timezone render in UTC, not server-local time.
+      The scheduler passes the task's own timezone, then a linked crew member's
+      timezone, and UTC when neither is set. It does not use the server's local zone.
     """
     if now_utc is None:
         utc_now = datetime.now(timezone.utc)

@@ -19,7 +19,12 @@ from src.task_action_policy import (
     is_admin_only_task_action,
     owner_has_admin_task_privileges,
 )
-from src.task_scheduler import compute_next_run, HOUSEKEEPING_DEFAULTS, _resolve_task_timezone
+from src.task_scheduler import (
+    compute_next_run,
+    HOUSEKEEPING_DEFAULTS,
+    _resolve_task_timezone,
+    adopt_legacy_task_timezones,
+)
 from routes.prefs_routes import _load_for_user, _save_for_user
 
 logger = logging.getLogger(__name__)
@@ -382,6 +387,14 @@ def setup_task_routes(task_scheduler) -> APIRouter:
             if status:
                 q = q.filter(ScheduledTask.status == status)
             tasks = q.order_by(ScheduledTask.created_at.desc()).all()
+            # A browser IANA name rewrites legacy UTC clocks into that zone.
+            # With no header, a non-UTC server zone is the fallback; UTC
+            # servers leave the row alone until a browser zone shows up.
+            adopted = adopt_legacy_task_timezones(
+                db, tasks, explicit_zone=request.headers.get("x-tz-name"),
+            )
+            if adopted:
+                db.commit()
             return {"tasks": [_task_to_dict(t, include_last_run_result=include_last_run) for t in tasks]}
         finally:
             db.close()

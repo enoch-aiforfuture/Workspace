@@ -42,7 +42,11 @@ function _setTaskCompletionPending(active) {
 
 async function _fetchTasks() {
   try {
-    const res = await fetch(`${API_BASE}/api/tasks`, { credentials: 'same-origin' });
+    const tz = _browserTimeZone();
+    const res = await fetch(`${API_BASE}/api/tasks`, {
+      credentials: 'same-origin',
+      headers: tz ? { 'X-Tz-Name': tz } : {},
+    });
     const data = await res.json();
     _tasks = data.tasks || [];
   } catch (e) {

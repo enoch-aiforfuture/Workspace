@@ -230,21 +230,207 @@ def compute_next_run(schedule: str, scheduled_time: str,
     return None
 
 
-def _resolve_task_timezone(db, task) -> str | None:
-    """Return the IANA timezone a task's scheduled_time is expressed in.
+_UTC_ZONE_NAMES = frozenset({"UTC", "Etc/UTC", "Etc/GMT", "GMT"})
+_SIMPLE_CRON_RE = re.compile(r"^(\d{1,2}) (\d{1,2}) \* \* (\*|[0-7])$")
 
-    A linked CrewMember's timezone wins, then the task's own ``timezone``.
-    None keeps the legacy behaviour (scheduled_time is a UTC wall clock).
+
+def valid_iana_timezone(name: str | None) -> str | None:
+    """Return name when it is a real IANA zone, else None."""
+    if not name or not str(name).strip():
+        return None
+    candidate = str(name).strip()
+    try:
+        from zoneinfo import ZoneInfo
+        ZoneInfo(candidate)
+    except Exception:
+        return None
+    return candidate
+
+
+def _local_zone_key() -> str | None:
+    return getattr(datetime.now().astimezone().tzinfo, "key", None)
+
+
+def server_iana_timezone() -> str | None:
+    """The server's IANA zone when it is a real named zone and not UTC.
+
+    A container whose clock is UTC has no user zone to adopt. Stamping those
+    rows as UTC would freeze them before a browser zone is known.
     """
-    if getattr(task, "crew_member_id", None):
+    key = _local_zone_key()
+    if not key or key in _UTC_ZONE_NAMES:
+        return None
+    return valid_iana_timezone(key)
+
+
+def _resolve_task_timezone(db, task) -> str | None:
+    """Return the IANA zone a task's scheduled clock is expressed in.
+
+    The task's own ``timezone`` is the wall clock. A linked crew member's
+    timezone is only the fallback for check-ins that never stored a zone of
+    their own. None keeps the legacy behaviour (the stored clock is UTC).
+    """
+    own = valid_iana_timezone(getattr(task, "timezone", None))
+    if own:
+        return own
+    if getattr(task, "crew_member_id", None) and db is not None:
         try:
             from core.database import CrewMember
             cm = db.query(CrewMember).filter(CrewMember.id == task.crew_member_id).first()
             if cm and cm.timezone:
-                return cm.timezone
+                return valid_iana_timezone(cm.timezone)
         except Exception:
             pass
-    return getattr(task, "timezone", None) or None
+    return None
+
+
+def shift_utc_hhmm_to_zone(
+    hhmm: str,
+    tz_name: str,
+    *,
+    weekday: int | None = None,
+    on: datetime | None = None,
+) -> tuple[str | None, int | None]:
+    """Interpret HH:MM as a UTC wall clock and return (local HH:MM, weekday).
+
+    ``weekday`` is Monday=0, matching ``scheduled_day``. The conversion uses
+    ``on`` (default: now) so the adopted local time is the one that clock
+    fires as today; later DST changes then follow the stored zone.
+    """
+    zone_name = valid_iana_timezone(tz_name)
+    if not zone_name:
+        return None, weekday
+    parts = (hhmm or "").split(":")
+    try:
+        hour, minute = int(parts[0]), int(parts[1])
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError
+    except (ValueError, IndexError):
+        return None, weekday
+    from zoneinfo import ZoneInfo
+    base = on or datetime.now(timezone.utc)
+    if base.tzinfo is None:
+        base = base.replace(tzinfo=timezone.utc)
+    else:
+        base = base.astimezone(timezone.utc)
+    if weekday is not None:
+        base = base + timedelta(days=(weekday - base.weekday()) % 7)
+    stamped = base.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    local = stamped.astimezone(ZoneInfo(zone_name))
+    new_hhmm = f"{local.hour:02d}:{local.minute:02d}"
+    if weekday is None:
+        return new_hhmm, None
+    day_delta = (local.date() - stamped.date()).days
+    return new_hhmm, (weekday + day_delta) % 7
+
+
+def adopt_task_schedule_timezone(
+    task,
+    tz_name: str | None,
+    *,
+    crew_timezone: str | None = None,
+    now: datetime | None = None,
+) -> bool:
+    """Persist a wall-clock zone on a task that does not have one.
+
+    A crew timezone is copied as-is: those clocks are already local to the
+    crew. Otherwise ``tz_name`` rewrites a legacy UTC ``scheduled_time`` or a
+    single-hour cron into that zone. Lists, ranges, and step crons stay on
+    the UTC clock because shifting them is ambiguous.
+    """
+    if valid_iana_timezone(getattr(task, "timezone", None)):
+        return False
+    crew = valid_iana_timezone(crew_timezone)
+    if crew:
+        task.timezone = crew
+        return True
+    zone = valid_iana_timezone(tz_name)
+    if not zone:
+        return False
+    schedule = (getattr(task, "schedule", None) or "").lower()
+    if schedule in {"daily", "weekly", "monthly"} and getattr(task, "scheduled_time", None):
+        weekday = task.scheduled_day if schedule == "weekly" else None
+        hhmm, new_day = shift_utc_hhmm_to_zone(
+            task.scheduled_time, zone, weekday=weekday, on=now,
+        )
+        if not hhmm:
+            return False
+        task.scheduled_time = hhmm
+        if schedule == "weekly" and new_day is not None:
+            task.scheduled_day = new_day
+        task.timezone = zone
+        return True
+    if schedule == "cron":
+        expr = (getattr(task, "cron_expression", None) or "").strip()
+        match = _SIMPLE_CRON_RE.match(expr)
+        if not match:
+            return False
+        minute, hour, dow = int(match.group(1)), int(match.group(2)), match.group(3)
+        if minute > 59 or hour > 23:
+            return False
+        py_weekday = None
+        if dow != "*":
+            py_weekday = (int(dow) % 7 - 1) % 7
+        hhmm, new_py = shift_utc_hhmm_to_zone(
+            f"{hour:02d}:{minute:02d}", zone, weekday=py_weekday, on=now,
+        )
+        if not hhmm:
+            return False
+        local_hour, local_minute = (int(part) for part in hhmm.split(":"))
+        if dow == "*":
+            task.cron_expression = f"{local_minute} {local_hour} * * *"
+        else:
+            cron_dow = (new_py + 1) % 7
+            task.cron_expression = f"{local_minute} {local_hour} * * {cron_dow}"
+        task.timezone = zone
+        return True
+    return False
+
+
+def adopt_legacy_task_timezones(db, tasks, explicit_zone: str | None = None) -> int:
+    """Adopt a zone for the given null-timezone tasks and refresh next_run.
+
+    ``explicit_zone`` is a browser IANA name when the request has one. A
+    missing or invalid name falls back to the server zone, and that fallback
+    is skipped when the server clock is UTC.
+    """
+    zone = valid_iana_timezone(explicit_zone) or server_iana_timezone()
+    crew_ids = {
+        task.crew_member_id
+        for task in tasks
+        if getattr(task, "crew_member_id", None)
+        and not valid_iana_timezone(getattr(task, "timezone", None))
+    }
+    crew_tz: dict = {}
+    if crew_ids and db is not None:
+        try:
+            from core.database import CrewMember
+            rows = db.query(CrewMember).filter(CrewMember.id.in_(list(crew_ids))).all()
+            crew_tz = {row.id: row.timezone for row in rows}
+        except Exception:
+            crew_tz = {}
+    changed = 0
+    for task in tasks:
+        if not adopt_task_schedule_timezone(
+            task,
+            zone,
+            crew_timezone=crew_tz.get(getattr(task, "crew_member_id", None)),
+        ):
+            continue
+        if (getattr(task, "trigger_type", None) or "schedule") == "schedule" and getattr(task, "status", None) == "active":
+            try:
+                task.next_run = compute_next_run(
+                    task.schedule,
+                    task.scheduled_time,
+                    getattr(task, "scheduled_day", None),
+                    getattr(task, "scheduled_date", None),
+                    cron_expression=getattr(task, "cron_expression", None),
+                    tz_name=getattr(task, "timezone", None),
+                )
+            except Exception as exc:
+                logger.warning("Could not recompute next_run after timezone adoption: %s", exc)
+        changed += 1
+    return changed
 
 
 # Built-in "housekeeping" tasks seeded for every owner, keyed by action.
@@ -482,6 +668,26 @@ class TaskScheduler:
                 db.close()
         except Exception as e:
             logger.warning(f"Could not clear stale task_runs on startup: {e}")
+
+        # Legacy rows stored a UTC wall clock and left timezone null. Copy a
+        # crew zone as-is, or rewrite the clock into the server's IANA zone
+        # when that zone is not UTC. A browser zone, when one arrives later,
+        # adopts whatever is still null.
+        try:
+            from core.database import SessionLocal as _SL, ScheduledTask as _ST
+            db = _SL()
+            try:
+                pending = db.query(_ST).filter(
+                    (_ST.timezone.is_(None)) | (_ST.timezone == "")
+                ).all()
+                adopted = adopt_legacy_task_timezones(db, pending, explicit_zone=None)
+                if adopted:
+                    db.commit()
+                    logger.info("Adopted a timezone on %d legacy scheduled tasks", adopted)
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning(f"Legacy task timezone adoption skipped: {e}")
 
         # Advance next_run for active tasks whose next_run is already in the
         # past. Without this, a restart hits _check_due_tasks() with an empty
