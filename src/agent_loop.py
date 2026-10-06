@@ -1085,6 +1085,14 @@ _ADMIN_KEYWORDS = [
     "note", "notes", "todo", "todos", "reminder", "reminders",
 ]
 
+# Whole words only, never inside a path or filename ("note.txt", "docker",
+# "chatgpt"): a match adds every admin schema, thousands of prompt tokens.
+_ADMIN_KEYWORD_RE = re.compile(
+    r"(?<![\w./-])(?:"
+    + "|".join(re.escape(kw) for kw in sorted(_ADMIN_KEYWORDS, key=len, reverse=True))
+    + r")(?:s|es|d|ed|ing)?(?![\w/-]|\.\w)"
+)
+
 def _detect_admin_intent(messages: List[Dict]) -> bool:
     """Check if the last user message suggests admin/management tool usage."""
     for msg in reversed(messages):
@@ -1093,7 +1101,7 @@ def _detect_admin_intent(messages: List[Dict]) -> bool:
             if isinstance(content, list):
                 content = " ".join(b.get("text", "") for b in content if isinstance(b, dict))
             content_lower = content.lower()
-            return any(kw in content_lower for kw in _ADMIN_KEYWORDS)
+            return bool(_ADMIN_KEYWORD_RE.search(content_lower))
     return False
 
 
@@ -1319,6 +1327,11 @@ _COOKBOOK_CONTEXT_RE = re.compile(
     r"gpu box|workstation|server|qwen|gemma|llama|mistral|minimax)\b",
     re.IGNORECASE,
 )
+_FILE_WORK_CONTEXT_RE = re.compile(
+    r"(?:^|[\s\"'`(])(?:~|\.{1,2})?/[\w.-]+/[\w./-]*"
+    r"|\b(?:files?|folders?|director(?:y|ies)|repo|terminal|shell|bash)\b",
+    re.IGNORECASE,
+)
 def _is_explicit_continuation(text: str) -> bool:
     """Only these terse replies may inherit older user turns for tool retrieval."""
     return bool(_EXPLICIT_CONTINUATION_RE.match(str(text or "").strip()))
@@ -1343,16 +1356,17 @@ def _is_casual_low_signal(text: str) -> bool:
 def _is_contextual_retry_continuation(messages: List[Dict], text: str) -> bool:
     """Treat "try again / it failed" as a continuation only for active tool work.
 
-    These follow-ups are common after Cookbook launches: the latest user turn
-    says only "try again it failed", while the actionable model/host/command
-    details live one or two turns back. Keep this intentionally narrow so
-    ordinary chat does not inherit stale Cookbook context.
+    These follow-ups are common after Cookbook launches and file/shell work:
+    the latest user turn says only "try again it failed" or "read it again",
+    while the actionable model/host/path details live one or two turns back.
+    Keep this intentionally narrow so ordinary chat does not inherit stale
+    tool context.
     """
     latest = str(text or "").strip()
     if not latest or not _RETRY_CONTINUATION_RE.search(latest):
         return False
     recent = _recent_context_for_retrieval(messages, max_user=5, max_chars=1200)
-    return bool(_COOKBOOK_CONTEXT_RE.search(recent))
+    return bool(_COOKBOOK_CONTEXT_RE.search(recent) or _FILE_WORK_CONTEXT_RE.search(recent))
 
 
 def _assistant_requested_followup(messages: List[Dict]) -> bool:
@@ -2599,8 +2613,11 @@ def _build_system_prompt(
     elif (
         relevant_tools
         and not suppress_local_context
-        and (set(relevant_tools) & _WORKSPACE_TERMINUS_TOOLS)
+        and (set(relevant_tools) & _DOMAIN_TOOL_MAP["files"])
     ):
+        # Keyed on file/shell tools, not the whole Terminus set: ask_user and
+        # update_plan ride along on nearly every turn and would otherwise
+        # prepend machine-task rules to ordinary chat.
         agent_prompt += _local_computer_rules()
 
     # When creating email documents, instruct the AI on the format

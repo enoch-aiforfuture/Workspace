@@ -1067,7 +1067,42 @@ def _is_local_minimax_mlx_request(url: str, model: str) -> bool:
         return False
 
 
+def _is_local_qwen_request(url: str, model: str) -> bool:
+    if not model or "qwen" not in model.lower():
+        return False
+    try:
+        from src.model_context import is_local_endpoint
+        return is_local_endpoint(url)
+    except Exception:
+        return False
+
+
+# Qwen3.x model-card sampling. Local OpenAI-compatible servers (mlx-vlm,
+# llama.cpp) don't apply the model's generation_config, so without these a
+# request samples the full distribution at whatever temperature it carries.
+_QWEN_NON_THINKING_SAMPLING = {"top_p": 0.8, "top_k": 20, "min_p": 0.0}
+_QWEN_THINKING_SAMPLING = {"top_p": 0.95, "top_k": 20, "min_p": 0.0}
+_QWEN_NON_THINKING_MAX_TEMPERATURE = 0.7
+
+
+def _apply_local_qwen_sampling(payload: Dict) -> None:
+    thinking = bool(payload.get("think"))
+    # mlx-vlm reads enable_thinking, not Ollama's think flag. Pin it so a
+    # server started with --enable-thinking can't wrap tool calls in <think>.
+    payload.setdefault("enable_thinking", thinking)
+    for key, value in (_QWEN_THINKING_SAMPLING if thinking else _QWEN_NON_THINKING_SAMPLING).items():
+        payload.setdefault(key, value)
+    if not thinking and "temperature" in payload:
+        try:
+            payload["temperature"] = min(float(payload["temperature"]), _QWEN_NON_THINKING_MAX_TEMPERATURE)
+        except (TypeError, ValueError):
+            payload["temperature"] = _QWEN_NON_THINKING_MAX_TEMPERATURE
+
+
 def _apply_local_generation_stability(payload: Dict, url: str, model: str) -> None:
+    if _is_local_qwen_request(url, model):
+        _apply_local_qwen_sampling(payload)
+        return
     if not _is_local_minimax_mlx_request(url, model):
         return
     if "temperature" in payload:
