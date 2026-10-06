@@ -27,9 +27,10 @@ if os.name == "nt":
     os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
 import logging
+import threading
 import numpy as np
 import httpx
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from src.runtime_paths import get_app_root
 
@@ -226,6 +227,29 @@ def _load_persisted_endpoint() -> dict:
 
 
 _http_embed_down = False  # process-level latch: skip re-probing a dead endpoint
+# One ONNX session per model. RAG, memory, and the tool index each build a
+# lane; constructing TextEmbedding again copies the weights onto the heap.
+_fastembed_clients: Dict[str, "FastEmbedClient"] = {}
+_fastembed_lock = threading.Lock()
+
+
+def reset_fastembed_clients() -> None:
+    """Drop cached local embedding sessions. Tests and model switches use this."""
+    with _fastembed_lock:
+        _fastembed_clients.clear()
+
+
+def get_fastembed_client(model: Optional[str] = None) -> "FastEmbedClient":
+    """Return the process-wide FastEmbed client for this model name."""
+    model_name = (model or os.getenv("FASTEMBED_MODEL") or _DEFAULT_FASTEMBED_MODEL).strip()
+    if not model_name:
+        model_name = _DEFAULT_FASTEMBED_MODEL
+    with _fastembed_lock:
+        client = _fastembed_clients.get(model_name)
+        if client is None:
+            client = FastEmbedClient(model=model_name)
+            _fastembed_clients[model_name] = client
+        return client
 
 
 def reset_http_embed_state():
@@ -267,9 +291,10 @@ def get_embedding_client():
             _http_embed_down = True
             logger.warning(f"HTTP embedding API unavailable ({e}); using local FastEmbed for the rest of this process")
 
-    # Fall back to local fastembed
+    # Fall back to local fastembed. Share the process-wide session so a
+    # failed HTTP probe does not load a second copy of the weights.
     try:
-        client = FastEmbedClient()
+        client = get_fastembed_client()
         client.get_sentence_embedding_dimension()
         logger.info(f"Using local FastEmbed: model={client.model}")
         return client
