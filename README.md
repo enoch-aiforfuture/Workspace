@@ -25,7 +25,7 @@
 
 ## Quick Start
 
-> `dev` is the default branch and gets the newest changes first. Use [`main`](https://github.com/enoch-aiforfuture/Workspace/tree/main) if you want the more curated branch.
+> [`main`](https://github.com/enoch-aiforfuture/Workspace/tree/main) is the only branch. Clone it, run it, and open pull requests against it.
 
 ```bash
 git clone https://github.com/enoch-aiforfuture/Workspace.git

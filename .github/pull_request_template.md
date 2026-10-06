@@ -4,7 +4,7 @@
 
 ## Target branch
 
-- [ ] This PR targets **`dev`**, not `main`. All PRs land in `dev`; `main` is curated by the maintainer at each release. If your PR is on `main` by accident, click "Edit" on this PR and change the base.
+- [ ] This PR targets **`main`**.
 
 ## Linked Issue
 
@@ -25,7 +25,7 @@ Fixes #
 ## Checklist
 
 - [ ] I searched [open issues](https://github.com/enoch-aiforfuture/Workspace/issues) and [open PRs](https://github.com/enoch-aiforfuture/Workspace/pulls) — this is not a duplicate.
-- [ ] This PR targets `dev`
+- [ ] This PR targets `main`
 - [ ] My changes are limited to the scope described above — no unrelated refactors or whitespace changes mixed in.
 - [ ] I actually ran the app (`docker compose up` or `uvicorn app:app`) and verified the change works end-to-end. Type-checks and unit tests are not enough.
 - [ ] I did not run the app/runtime validation and stated that gap in **How to Test**. Leave this unchecked when the app-run box above is checked.

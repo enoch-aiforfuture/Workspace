@@ -170,6 +170,15 @@ class TestDetectAdminIntent:
     def test_general_question(self):
         assert _detect_admin_intent(self._msgs("what is the capital of France?")) is False
 
+    def test_web_server_is_not_admin(self):
+        assert _detect_admin_intent(self._msgs("explain how a web server works")) is False
+
+    def test_postgres_server_is_not_admin(self):
+        assert _detect_admin_intent(self._msgs("my postgres server keeps crashing")) is False
+
+    def test_calendar_schedule_is_not_admin(self):
+        assert _detect_admin_intent(self._msgs("schedule a meeting with Bob")) is False
+
     # --- Edge cases ---
 
     def test_empty_messages(self):

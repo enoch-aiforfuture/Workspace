@@ -147,7 +147,7 @@ When route/API behavior changes, check whether a matching CLI script depends on 
 
 `.github/` owns issue/PR templates, a copyable PR review template, description-check workflows, security/governance workflows, Docker publishing, and CI. Current CI runs on pushes to `main` and `dev` plus pull requests, compiles Python with `python -m compileall`, syntax-checks first-party JS with `node --check`, emits focused-test guidance for changed code, and runs the configured `python -m pytest -q` scope as an authoritative failing job; pytest still skips documentation-only changes.
 
-`CONTRIBUTING.md` owns the branch model: PRs target `dev`; `main` is the curated user-running branch fast-forwarded from stable `dev` commits. Contributors who accidentally target `main` should retarget the PR base without rebasing.
+`CONTRIBUTING.md` owns the branch model: this repository uses `main` as its only branch, and pull requests target `main`.
 
 PR description checks:
 
@@ -173,7 +173,7 @@ Security metadata includes container Trivy SARIF upload, Dockerfile lint, depend
 
 `scripts/pr_blocker_audit.py` is a read-only maintainer/contributor triage helper documented in `docs/pr-blocker-audit.md`. It can fetch or ingest open PR metadata, estimate hot files and possible duplicate groups, and emit Markdown, JSON, or terminal reports. Its duplicate/blocker output is advisory, not an authority that a PR is blocked.
 
-Before posting PRs or issues, compare drafts against current templates on latest `main` or current `dev` as appropriate for the target. Keep unpublished drafts and raw related-search exports out of tracked implementation specs unless intentionally promoted.
+Before posting PRs or issues, compare drafts against current templates on latest `main`. Keep unpublished drafts and raw related-search exports out of tracked implementation specs unless intentionally promoted.
 
 ## Artifacts And Secrets
 

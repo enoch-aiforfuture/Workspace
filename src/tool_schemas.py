@@ -790,13 +790,15 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "manage_tokens",
-            "description": "Manage API access tokens: list existing tokens, create new ones, or delete them.",
+            "description": "Manage API access tokens: list existing tokens, create new ones, or delete them. Created tokens use the wsp_ prefix auth accepts, belong to the current user, and default to the chat scope.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["list", "create", "delete"]},
                     "token_id": {"type": "string", "description": "Token ID (for delete)"},
-                    "name": {"type": "string", "description": "Token name (for create)"}
+                    "name": {"type": "string", "description": "Token name (for create)"},
+                    "scopes": {"type": "string", "description": "Comma-separated scopes for create. Defaults to chat. Unknown scopes are rejected."},
+                    "profile": {"type": "string", "description": "Named scope profile for create (chat, codex_todos, codex_documents, codex_email_drafts). Used instead of scopes when set."}
                 },
                 "required": ["action"]
             }

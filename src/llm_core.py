@@ -1087,9 +1087,11 @@ _QWEN_NON_THINKING_MAX_TEMPERATURE = 0.7
 
 def _apply_local_qwen_sampling(payload: Dict) -> None:
     thinking = bool(payload.get("think"))
-    # mlx-vlm reads enable_thinking, not Ollama's think flag. Pin it so a
-    # server started with --enable-thinking can't wrap tool calls in <think>.
-    payload.setdefault("enable_thinking", thinking)
+    # mlx-vlm reads enable_thinking, not Ollama's think flag. Assign, don't
+    # setdefault: a payload that already carried enable_thinking=true (server
+    # default, or an earlier merge) would keep wrapping tool calls in <think>
+    # after this path forced think=false.
+    payload["enable_thinking"] = thinking
     for key, value in (_QWEN_THINKING_SAMPLING if thinking else _QWEN_NON_THINKING_SAMPLING).items():
         payload.setdefault(key, value)
     if not thinking and "temperature" in payload:

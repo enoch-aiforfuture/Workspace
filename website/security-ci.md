@@ -64,8 +64,8 @@ This makes the **Merge** button refuse to work until the gating checks pass.
 2. Click **Settings** (top right of the repo).
 3. In the left sidebar, click **Branches**.
 4. Under **Branch protection rules**, click **Add branch ruleset** (or **Add
-   rule**), and set the branch name pattern to `dev` (this is the branch all
-   pull requests target; `main` is fast-forwarded at releases).
+   rule**), and set the branch name pattern to `main` (the branch pull
+   requests target).
 5. Enable **Require status checks to pass before merging**.
 6. In the search box that appears, add these checks by name:
    - `Python syntax (compileall)`

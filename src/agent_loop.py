@@ -697,7 +697,7 @@ Generate an image. Line 1 = description, line 2 = model name, line 3 = WxH (e.g.
     "manage_endpoints": "- ```manage_endpoints``` — Add, remove, or configure AI model API endpoints. Args (JSON): {\"action\": \"list|add|delete|enable|disable\", ...}. Use when user wants to add a new AI provider.",
     "manage_mcp": "- ```manage_mcp``` — Manage MCP (Model Context Protocol) tool servers — external tools that extend your capabilities. Args (JSON): {\"action\": \"list|add|delete|reconnect|list_tools\", ...}",
     "manage_webhooks": "- ```manage_webhooks``` — Configure outgoing webhooks (HTTP notifications on events like chat completion). Args (JSON): {\"action\": \"list|add|delete|enable|disable\", ...}",
-    "manage_tokens": "- ```manage_tokens``` — Generate or revoke API access tokens for external integrations. Args (JSON): {\"action\": \"list|create|delete\", ...}",
+    "manage_tokens": "- ```manage_tokens``` — Generate or revoke API access tokens for external integrations. Args (JSON): {\"action\": \"list|create|delete\", \"name\": \"...\", \"scopes\": \"chat\", \"profile\": \"chat|codex_todos|codex_documents|codex_email_drafts\", \"token_id\": \"...\"}. `create` returns a `wsp_` secret once; auth rejects any other prefix. Default scope is `chat`.",
     "manage_documents": "- ```manage_documents``` — List, read/open, delete, or tidy documents in the editor panel. Args (JSON): {\"action\": \"list|read|delete|tidy\", ...}. `list` returns rows like `[Title](#document-<id>) — lang, size, updated 5m ago` sorted MOST-RECENT FIRST; the user clicks the anchor to open. `read` (aliases: view/open/get) takes `document_id` and returns the content. When the user asks \"open/show/read my notes\" or \"what documents do I have\", use this — do NOT shell out, do NOT curl.",
     "manage_research": "- ```manage_research``` — List, read/open, or delete saved DEEP RESEARCH results from the Library. Args (JSON): {\"action\": \"list|read|delete\", \"id\": \"<id>\", \"search\": \"...\"}. `list` returns rows like `[query](#research-<id>) — N sources` MOST-RECENT FIRST; the user clicks to open. `read` (aliases: open/view/get) takes `id` and returns the report text + sources. Use when the user says \"open/read/find/delete my research\" or \"that report\". This IS how you read a finished report: when the user refers to a just-completed deep-research job (\"check it out\", \"read that report\", \"summarize the research\") WITHOUT giving an id, call `manage_research` with `action:list` to get the most-recent id, then `action:read` with that id, and answer from the returned text. Do NOT `web_fetch`/`app_api` the `/api/research/report/{id}` URL — that endpoint renders HTML for the browser, not clean text — and do NOT start a fresh `web_search`/`trigger_research` just to read an existing report. To START new research, use trigger_research instead.",
     "manage_settings": "- ```manage_settings``` — View/change the REAL app settings (same ones the Settings panel writes) AND turn tools on/off. Change a setting: `{\"action\":\"set\",\"key\":\"...\",\"value\":\"...\"}` — keys accept friendly aliases, e.g. voice→tts_voice, \"search engine\"→search_provider, \"default model\"→default_model, \"teacher model\"→teacher_model, \"task/background model\"→task_model, \"image quality\"→image_quality, \"reminder channel\"→reminder_channel (browser|email|ntfy), \"agent timeout\"/\"max tool calls\"/\"token budget\". Read: `{\"action\":\"get\",\"key\":\"...\"}`; see all: `{\"action\":\"list\"}`; reset one: `{\"action\":\"reset\",\"key\":\"...\"}`. Use this when the user asks to change ANY preference instead of making them open Settings. Secrets/API keys are read-only (tell them to set those in the panel). Tool toggles: `{\"action\":\"disable_tool|enable_tool\",\"tool\":\"shell\"}` (aliases: shell/search/browser/documents/memory/skills/images/tasks/notes/calendar/email), list disabled: `{\"action\":\"list_tools\"}`.",
@@ -1069,13 +1069,17 @@ def _agent_route_tool_mode(
         is_api_model = any(host in endpoint_url for host in _API_HOSTS) or model_supports_tools
     return is_api_model, is_ollama_native, ollama_openai_compat
 
-# Admin tool keywords — if the last user message contains any of these, include admin tools
+# Admin tool keywords — if the last user message contains any of these, include admin tools.
+# A match unions every admin schema into the prompt. Bare "server" and
+# "schedule" stay out ("explain a web server", "schedule a meeting"): "mcp"
+# covers MCP servers, and "scheduled" / "cron" / "task" cover the scheduler.
+# "chat" stays because "open this chat" has no other admin keyword.
 _ADMIN_KEYWORDS = [
     "session", "sessions", "chat", "chats", "conversation", "conversations",
     "delete", "fork", "truncate",
     "archive", "rename", "endpoint", "endpoints", "api key",
-    "webhook", "webhooks", "token", "tokens", "mcp", "server", "skill", "skills",
-    "task", "tasks", "schedule", "cron", "setting", "settings", "preference",
+    "webhook", "webhooks", "token", "tokens", "mcp", "skill", "skills",
+    "task", "tasks", "scheduled", "cron", "setting", "settings", "preference",
     "configure", "config", "setup", "manage", "admin", "pipeline", "second opinion",
     "list models", "switch model", "change model", "theme", "create theme",
     # Documents — "show/list/read my docs", "open my notes file", etc.
