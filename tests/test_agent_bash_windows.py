@@ -35,6 +35,7 @@ async def test_windows_bash_uses_git_bash_with_structural_cwd(monkeypatch):
     assert result is process
     assert captured["argv"] == (bash, "-c", "pwd; cat package.json")
     assert captured["kwargs"]["cwd"] == workspace
+    assert captured["kwargs"]["stdin"] is subprocess_tools.asyncio.subprocess.DEVNULL
 
 
 @pytest.mark.asyncio
@@ -125,4 +126,10 @@ async def test_posix_bash_keeps_existing_shell_path(monkeypatch):
     result = await subprocess_tools._create_bash_subprocess("pwd", cwd="/tmp/work")
 
     assert result is process
-    assert captured == {"command": "pwd", "kwargs": {"cwd": "/tmp/work"}}
+    assert captured == {
+        "command": "pwd",
+        "kwargs": {
+            "cwd": "/tmp/work",
+            "stdin": subprocess_tools.asyncio.subprocess.DEVNULL,
+        },
+    }
