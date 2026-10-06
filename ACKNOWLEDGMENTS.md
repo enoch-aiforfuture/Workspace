@@ -29,7 +29,7 @@ The full license texts are kept in [`licenses/`](licenses/).
   Copyright © Alex Jones. **MIT License.** Adapted in `services/hwfit/`
   (hardware detection, quant-aware fit scoring, model catalog),
   `routes/cookbook_*.py`, `routes/hwfit_routes.py`, `static/js/cookbook*.js`,
-  and `scripts/odysseus-cookbook`.
+  and `scripts/workspace-cookbook`.
 - **[Tongyi DeepResearch](https://github.com/Alibaba-NLP/DeepResearch)** by
   **Alibaba-NLP / Tongyi Lab** — the multi-step deep-research agent pipeline.
   Copyright © Alibaba-NLP / Tongyi Lab. **Apache-2.0.** Adapted for Odysseus's
