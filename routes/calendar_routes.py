@@ -4,7 +4,7 @@ import logging
 import json
 import re
 import uuid
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File
@@ -647,6 +647,7 @@ def _event_to_dict(ev: CalendarEvent) -> dict:
         "description": ev.description or "",
         "location": ev.location or "",
         "rrule": ev.rrule or "",
+        "timezone": getattr(ev, "timezone", None) or "",
         "recurrence_exdates": _recurrence_exdates(ev),
         "calendar": ev.calendar.name if ev.calendar else "",
         "calendar_href": ev.calendar_id,
@@ -683,6 +684,33 @@ def _occurrence_exdate_key(uid: str, ev: CalendarEvent) -> str:
     return suffix[:16]
 
 
+def _rrule_dtstart(ev: CalendarEvent):
+    """DTSTART for ``rrulestr``, plus the zone it is expressed in.
+
+    Imported recurring events store a naive UTC instant and, when the source
+    had a TZID, that zone name. RFC 5545 evaluates BYDAY and the wall clock in
+    the DTSTART zone, so expanding the UTC instant lands on the wrong weekday
+    and the hour drifts across DST. Rows with no stored zone keep the naive
+    clock (legacy local events, and UTC rows imported before the zone was kept).
+    """
+    tz_name = (getattr(ev, "timezone", None) or "").strip()
+    start = ev.dtstart
+    if (
+        not tz_name
+        or getattr(ev, "all_day", False)
+        or not getattr(ev, "is_utc", False)
+        or start is None
+        or getattr(start, "tzinfo", None) is not None
+    ):
+        return start, None
+    try:
+        from zoneinfo import ZoneInfo
+        zone = ZoneInfo(tz_name)
+    except Exception:
+        return start, None
+    return start.replace(tzinfo=timezone.utc).astimezone(zone), zone
+
+
 def _expand_rrule(
     ev: CalendarEvent, start: datetime, end: datetime
 ) -> List[dict]:
@@ -710,20 +738,23 @@ def _expand_rrule(
 
     # Parse the rrule, applying it to the base dtstart.
     rrule_str = ev.rrule
-    if ev.dtstart is not None and getattr(ev.dtstart, "tzinfo", None) is None:
+    expand_dt, zone = _rrule_dtstart(ev)
+    if zone is None and ev.dtstart is not None and getattr(ev.dtstart, "tzinfo", None) is None:
         # Events are stored with a naive (UTC) dtstart, but standard .ics
         # exporters (Google/Apple/Outlook/Fastmail) write the bound as an
         # absolute UTC value, e.g. UNTIL=20240105T090000Z. dateutil refuses to
         # mix a tz-aware UNTIL with a naive DTSTART ("RRULE UNTIL values must be
         # specified in UTC when DTSTART is timezone-aware"), so the except branch
         # below would silently collapse the whole series to a single event.
-        # Drop the trailing Z so UNTIL matches the naive DTSTART.
+        # Drop the trailing Z so UNTIL matches the naive DTSTART. A zoned
+        # expansion keeps the Z: dateutil requires a UTC UNTIL when DTSTART
+        # is timezone-aware.
         import re as _re
         rrule_str = _re.sub(
             r"(UNTIL=\d{8}(?:T\d{6})?)Z", r"\1", rrule_str, flags=_re.IGNORECASE
         )
     try:
-        rule = rrulestr(rrule_str, dtstart=ev.dtstart)
+        rule = rrulestr(rrule_str, dtstart=expand_dt)
     except Exception as ex:
         logger.warning(
             "Failed to parse rrule=%r for event %s: %s", ev.rrule, ev.uid, ex
@@ -744,12 +775,19 @@ def _expand_rrule(
     # (matching non-recurring overlap semantics: dtstart < end AND
     # dtend > start).
     expand_start = start - duration
+    if zone is not None:
+        # The query window is naive UTC, matching the stored instants.
+        expand_start = expand_start.replace(tzinfo=timezone.utc).astimezone(zone)
     results = []
     truncated = False
     base = _event_to_dict(ev)
     exdates = set(_recurrence_exdates(ev))
 
-    for occ_start in rule.xafter(expand_start, inc=True):
+    for occ_raw in rule.xafter(expand_start, inc=True):
+        if zone is not None:
+            occ_start = occ_raw.astimezone(timezone.utc).replace(tzinfo=None)
+        else:
+            occ_start = occ_raw
         if occ_start >= end:
             break
 
@@ -1502,6 +1540,7 @@ def setup_calendar_routes(upload_handler=None) -> APIRouter:
                 # the naive ISO as the user's CURRENT local, which is exactly
                 # the bug where imported events fire reminders at wrong times.
                 from datetime import timezone as _tz
+                from src.caldav_sync import _source_tzid
                 row_is_utc = False
                 if all_day:
                     start_dt = datetime(dt_val.year, dt_val.month, dt_val.day)
@@ -1535,6 +1574,7 @@ def setup_calendar_routes(upload_handler=None) -> APIRouter:
                     dtend=end_dt,
                     all_day=all_day,
                     is_utc=row_is_utc,
+                    timezone=_source_tzid(dtstart) if row_is_utc else None,
                     rrule=(comp.get("rrule").to_ical().decode() if comp.get("rrule") else ""),
                 )
                 db.add(ev)

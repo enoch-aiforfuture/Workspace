@@ -1783,7 +1783,7 @@ def _migrate_add_crew_member_id():
                 conn.commit()
                 logging.getLogger(__name__).info("Added crew_member_id column to scheduled_tasks")
     except Exception as e:
-        logging.getLogger(__name__).warning(f"crew_member_id migration: {e}")
+            logging.getLogger(__name__).warning(f"crew_member_id migration: {e}")
 
 def _migrate_add_assistant_columns():
     """Add is_default_assistant + timezone columns to crew_members for the personal-assistant feature."""
@@ -1869,6 +1869,10 @@ class CalendarEvent(TimestampMixin, Base):
     # that preserve the source TZID). False = legacy naive-local. Drives the
     # `Z`-suffix on serialization so the frontend interprets correctly.
     is_utc      = Column(Boolean, default=False, nullable=False)
+    # IANA zone of an imported TZID (e.g. "America/Los_Angeles"). Recurrence
+    # expands in this zone so BYDAY and the wall clock survive DST. NULL keeps
+    # the legacy behaviour: the stored naive clock is the recurrence clock.
+    timezone    = Column(String, nullable=True)
     rrule       = Column(String, default="")
     recurrence_exdates = Column(Text, default="")  # JSON list of skipped occurrence starts
     color       = Column(String, nullable=True)  # per-event color override
@@ -2138,6 +2142,7 @@ def init_db():
     _migrate_seed_email_account()
     _migrate_add_calendar_metadata()
     _migrate_add_calendar_is_utc()
+    _migrate_add_calendar_event_timezone()
     _migrate_add_calendar_origin()
     _migrate_add_calendar_account_id()
     _migrate_add_caldav_sync_columns()
@@ -2537,6 +2542,29 @@ def _migrate_add_calendar_metadata():
         conn.commit()
     except Exception as e:
         logging.getLogger(__name__).warning(f"calendar_events migration failed: {e}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _migrate_add_calendar_event_timezone():
+    """Remember the source TZID so recurring imports expand in that zone."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(calendar_events)").fetchall()]
+        if columns and "timezone" not in columns:
+            conn.execute("ALTER TABLE calendar_events ADD COLUMN timezone TEXT")
+            conn.commit()
+            logging.getLogger(__name__).info("Migrated: added 'timezone' column to calendar_events")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"calendar_events timezone migration failed: {e}")
     finally:
         try:
             conn.close()
