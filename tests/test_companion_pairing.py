@@ -86,7 +86,7 @@ def test_mint_token_returns_raw_once_and_stores_only_a_hash(monkeypatch):
         monkeypatch.setattr(parent, "database", _db, raising=False)
 
     token_id, raw = P.mint_token("alice")
-    assert raw.startswith("ody_")
+    assert raw.startswith("wsp_")
     # The persisted row stores a bcrypt hash + prefix, never the plaintext.
     assert _CAPTURED["token_hash"] != raw
     assert _CAPTURED["token_hash"].startswith("$2")  # bcrypt
@@ -99,22 +99,22 @@ def test_mint_token_returns_raw_once_and_stores_only_a_hash(monkeypatch):
 def test_mint_pairing_token_invalidates_cache(monkeypatch):
     # The mint must flip the auth middleware's cache so the token works on the
     # very next request, with no restart.
-    monkeypatch.setattr(P, "mint_token", lambda owner, name="companion": ("id1", "ody_demo"))
+    monkeypatch.setattr(P, "mint_token", lambda owner, name="companion": ("id1", "wsp_demo"))
     invalidate = MagicMock()
     token_id, raw = mint_pairing_token("alice", invalidate)
-    assert (token_id, raw) == ("id1", "ody_demo")
+    assert (token_id, raw) == ("id1", "wsp_demo")
     invalidate.assert_called_once()
 
 
 def test_mint_pairing_token_tolerates_no_invalidator(monkeypatch):
-    monkeypatch.setattr(P, "mint_token", lambda owner, name="companion": ("id1", "ody_demo"))
+    monkeypatch.setattr(P, "mint_token", lambda owner, name="companion": ("id1", "wsp_demo"))
     # Must not blow up if the app didn't expose an invalidator.
-    assert mint_pairing_token("alice", None) == ("id1", "ody_demo")
+    assert mint_pairing_token("alice", None) == ("id1", "wsp_demo")
 
 
 def test_pairing_payload_shape():
-    p = P.pairing_payload("192.168.1.9", 7000, "ody_x")
-    assert p == {"v": 1, "host": "192.168.1.9", "port": 7000, "token": "ody_x"}
+    p = P.pairing_payload("192.168.1.9", 7000, "wsp_x")
+    assert p == {"v": 1, "host": "192.168.1.9", "port": 7000, "token": "wsp_x"}
 
 
 @pytest.mark.parametrize(
@@ -321,7 +321,7 @@ def test_pair_get_renders_form_without_minting(monkeypatch):
 
 
 def test_pair_post_json_returns_pairing_payload(monkeypatch):
-    mint = MagicMock(return_value=("tok123", "ody_raw"))
+    mint = MagicMock(return_value=("tok123", "wsp_raw"))
     monkeypatch.setattr(R, "require_admin", lambda request: None, raising=False)
     monkeypatch.setattr(R, "get_current_user", lambda request: "alice")
     monkeypatch.setattr(R, "mint_pairing_token", mint)
@@ -333,7 +333,7 @@ def test_pair_post_json_returns_pairing_payload(monkeypatch):
     mint.assert_called_once_with("alice", request.app.state.invalidate_token_cache)
     assert response["host"] == "192.168.1.50"
     assert response["port"] == 7000
-    assert response["token"] == "ody_raw"
+    assert response["token"] == "wsp_raw"
     assert response["token_id"] == "tok123"
     assert set(response) == {
         "host",
@@ -348,7 +348,7 @@ def test_pair_post_json_returns_pairing_payload(monkeypatch):
         "v": 1,
         "host": "192.168.1.50",
         "port": 7000,
-        "token": "ody_raw",
+        "token": "wsp_raw",
     }
     for secret_key in ("token_hash", "token_prefix", "scopes", "is_active", "owner", "name"):
         assert secret_key not in response
@@ -357,7 +357,7 @@ def test_pair_post_json_returns_pairing_payload(monkeypatch):
 
 def test_pair_post_json_prefers_configured_origin(monkeypatch):
     monkeypatch.setenv("COMPANION_BASE_URL", "http://workspace.local:7000")
-    mint = MagicMock(return_value=("tok123", "ody_raw"))
+    mint = MagicMock(return_value=("tok123", "wsp_raw"))
     discovery = MagicMock(side_effect=AssertionError("configured origin must skip LAN discovery"))
     monkeypatch.setattr(R, "require_admin", lambda request: None, raising=False)
     monkeypatch.setattr(R, "get_current_user", lambda request: "alice")
@@ -384,7 +384,7 @@ def test_pair_post_json_prefers_configured_origin(monkeypatch):
         "v": 1,
         "host": "workspace.local",
         "port": 7000,
-        "token": "ody_raw",
+        "token": "wsp_raw",
     }
     discovery.assert_not_called()
 
@@ -411,7 +411,7 @@ def test_pair_post_rejects_invalid_config_before_mint_without_echoing_it(monkeyp
 def test_pair_post_json_qr_failure_returns_null_qr(monkeypatch):
     monkeypatch.setattr(R, "require_admin", lambda request: None, raising=False)
     monkeypatch.setattr(R, "get_current_user", lambda request: "alice")
-    monkeypatch.setattr(R, "mint_pairing_token", lambda owner, invalidate: ("tok123", "ody_raw"))
+    monkeypatch.setattr(R, "mint_pairing_token", lambda owner, invalidate: ("tok123", "wsp_raw"))
     monkeypatch.setattr(R._pairing, "lan_ip_candidates", lambda: ["192.168.1.50"])
     monkeypatch.setattr(R._pairing, "pairing_qr_png_data_uri", lambda payload: None)
 
@@ -420,19 +420,19 @@ def test_pair_post_json_qr_failure_returns_null_qr(monkeypatch):
     assert response["qr"] is None
     assert response["host"] == "192.168.1.50"
     assert response["port"] == 7000
-    assert response["token"] == "ody_raw"
+    assert response["token"] == "wsp_raw"
     assert response["payload"] == {
         "v": 1,
         "host": "192.168.1.50",
         "port": 7000,
-        "token": "ody_raw",
+        "token": "wsp_raw",
     }
 
 
 def test_pair_post_html_escapes_pairing_values(monkeypatch):
     monkeypatch.setattr(R, "require_admin", lambda request: None, raising=False)
     monkeypatch.setattr(R, "get_current_user", lambda request: "alice")
-    monkeypatch.setattr(R, "mint_pairing_token", lambda owner, invalidate: ("tok<123>", "ody_<raw>&"))
+    monkeypatch.setattr(R, "mint_pairing_token", lambda owner, invalidate: ("tok<123>", "wsp_<raw>&"))
     monkeypatch.setattr(R._pairing, "lan_ip_candidates", lambda: ["host<one>&"])
     monkeypatch.setattr(R._pairing, "pairing_qr_png_data_uri", lambda payload: None)
 
@@ -441,8 +441,8 @@ def test_pair_post_html_escapes_pairing_values(monkeypatch):
 
     assert response.media_type == "text/html"
     assert "host<one>&" not in body
-    assert "ody_<raw>&" not in body
+    assert "wsp_<raw>&" not in body
     assert "tok<123>" not in body
     assert "host&lt;one&gt;&amp;" in body
-    assert "ody_&lt;raw&gt;&amp;" in body
+    assert "wsp_&lt;raw&gt;&amp;" in body
     assert "tok&lt;123&gt;" in body

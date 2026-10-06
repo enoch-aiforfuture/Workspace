@@ -56,23 +56,23 @@ class TestRefreshPopulatesCache:
     """Single refresh call should populate _token_cache from DB rows."""
 
     def test_single_row(self, app_module):
-        _seed(app_module, [_row("ody_abc")])
+        _seed(app_module, [_row("wsp_abc")])
         app_module.app.state._token_cache_dirty = True
         app_module._refresh_token_cache()
-        assert "ody_abc" in app_module._token_cache
-        assert app_module._token_cache["ody_abc"][0][0] == "t1"
+        assert "wsp_abc" in app_module._token_cache
+        assert app_module._token_cache["wsp_abc"][0][0] == "t1"
 
     def test_multiple_prefixes(self, app_module):
         _seed(app_module, [
-            _row("ody_aaaa", "t1", "h1", "admin", "chat"),
-            _row("ody_bbbb", "t2", "h2", "admin", "chat,tools"),
-            _row("ody_aaaa", "t3", "h3", "admin", "memory"),
+            _row("wsp_aaaa", "t1", "h1", "admin", "chat"),
+            _row("wsp_bbbb", "t2", "h2", "admin", "chat,tools"),
+            _row("wsp_aaaa", "t3", "h3", "admin", "memory"),
         ])
         app_module.app.state._token_cache_dirty = True
         app_module._refresh_token_cache()
         assert len(app_module._token_cache) == 2
-        assert len(app_module._token_cache["ody_aaaa"]) == 2
-        assert app_module._token_cache["ody_bbbb"][0][3] == ["chat", "tools"]
+        assert len(app_module._token_cache["wsp_aaaa"]) == 2
+        assert app_module._token_cache["wsp_bbbb"][0][3] == ["chat", "tools"]
 
     def test_empty_db_clears_cache(self, app_module):
         app_module._token_cache["stale"] = [("x", "y", "z", ["chat"])]
@@ -86,14 +86,14 @@ class TestAppStateSync:
     """app.state._token_cache must stay synchronized with _token_cache."""
 
     def test_state_ref_matches_after_refresh(self, app_module):
-        _seed(app_module, [_row("ody_sync")])
+        _seed(app_module, [_row("wsp_sync")])
         app_module.app.state._token_cache_dirty = True
         app_module._refresh_token_cache()
         assert app_module.app.state._token_cache is app_module._token_cache
-        assert "ody_sync" in app_module.app.state._token_cache
+        assert "wsp_sync" in app_module.app.state._token_cache
 
     def test_state_dirty_cleared(self, app_module):
-        _seed(app_module, [_row("ody_x")])
+        _seed(app_module, [_row("wsp_x")])
         app_module.app.state._token_cache_dirty = True
         app_module._refresh_token_cache()
         assert app_module.app.state._token_cache_dirty is False
@@ -104,7 +104,7 @@ class TestConcurrentReaders:
 
     def test_no_empty_reads_during_refresh(self, app_module):
         """4 reader threads + 100 refreshes on the real _token_cache global."""
-        _seed(app_module, [_row("ody_race")])
+        _seed(app_module, [_row("wsp_race")])
         app_module.app.state._token_cache_dirty = True
         app_module._refresh_token_cache()
 
@@ -143,7 +143,7 @@ class TestConcurrentReaders:
 
     def test_no_empty_reads_with_token_churn(self, app_module):
         """Simulate token create/revoke churn while reading."""
-        _seed(app_module, [_row("ody_keep", "t1", "h1", "admin", "chat")])
+        _seed(app_module, [_row("wsp_keep", "t1", "h1", "admin", "chat")])
         app_module.app.state._token_cache_dirty = True
         app_module._refresh_token_cache()
 
@@ -160,11 +160,11 @@ class TestConcurrentReaders:
         def churner():
             for i in range(50):
                 _seed(app_module, [
-                    _row("ody_keep", "t1", "h1", "admin", "chat"),
-                    _row("ody_new_%d" % i, "t%d" % (i + 10), "h%d" % (i + 10), "admin", "chat"),
+                    _row("wsp_keep", "t1", "h1", "admin", "chat"),
+                    _row("wsp_new_%d" % i, "t%d" % (i + 10), "h%d" % (i + 10), "admin", "chat"),
                 ])
                 app_module._refresh_token_cache()
-                _seed(app_module, [_row("ody_keep", "t1", "h1", "admin", "chat")])
+                _seed(app_module, [_row("wsp_keep", "t1", "h1", "admin", "chat")])
                 app_module._refresh_token_cache()
 
         readers = [threading.Thread(target=reader, daemon=True) for _ in range(4)]
@@ -184,5 +184,5 @@ class TestConcurrentReaders:
             % (results["empty"], results["ok"])
         )
         assert results["ok"] > 0
-        assert "ody_keep" in app_module._token_cache
+        assert "wsp_keep" in app_module._token_cache
         assert len(app_module._token_cache) == 1

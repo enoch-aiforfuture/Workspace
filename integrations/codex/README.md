@@ -12,7 +12,7 @@ This directory contains the Codex plugin/skill bundle for Workspace.
 
 ```bash
 export WORKSPACE_URL=http://your-workspace-host:7000
-export WORKSPACE_API_TOKEN=ody_generated_token
+export WORKSPACE_API_TOKEN=wsp_generated_token
 mkdir -p ~/plugins
 curl -fsSL -H "Authorization: Bearer $WORKSPACE_API_TOKEN" "$WORKSPACE_URL/api/codex/plugin.zip" -o /tmp/workspace-codex-plugin.zip
 python3 -m zipfile -e /tmp/workspace-codex-plugin.zip ~/plugins

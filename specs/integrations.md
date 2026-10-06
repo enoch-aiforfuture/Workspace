@@ -57,7 +57,7 @@ Setup instructions are duplicated in integration READMEs and `static/js/settings
 
 `routes.api_token_routes` owns token profiles, allowed scopes, scope normalization, token creation/update/revocation, and profile metadata shown in Settings. Partial updates preserve existing scopes unless new scopes are supplied, owner checks apply to update/delete, and write scopes auto-include their read scope where applicable.
 
-`app.py` owns bearer-token validation. It accepts `Bearer ody_...`, checks a bcrypt hash through a prefix cache, updates `last_used_at` asynchronously, and stamps:
+`app.py` owns bearer-token validation. It accepts `Bearer wsp_...`, checks a bcrypt hash through a prefix cache, updates `last_used_at` asynchronously, and stamps:
 
 - `request.state.current_user = "api"`;
 - `request.state.api_token = True`;
@@ -188,7 +188,7 @@ The integration audit also ran the targeted venv subset covering those areas wit
 - Token profile/update behavior and Settings agent-token scope toggles need direct coverage.
 - Codex Cookbook scopes need continued Settings, route-check, and `ALLOWED_SCOPES` regression coverage.
 - Generic integration HTTP CRUD/test routes, `execute_api_call()` auth modes, response shaping, and frontend Settings/Admin flows need direct coverage.
-- `do_manage_tokens()` does not match `/api/tokens` semantics for `ody_` prefix, owner, scopes, and cache invalidation.
+- `do_manage_tokens()` does not match `/api/tokens` semantics for `wsp_` prefix, owner, scopes, and cache invalidation.
 - `do_manage_webhooks()` bypasses route behavior and does not cover signing-secret parity.
 - Companion read endpoints should either require `chat` scope or be documented as an explicit scope-policy exception.
 - Decide whether webhook secret plaintext fallback should remain accepted when the API key manager is unavailable.

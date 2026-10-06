@@ -171,12 +171,12 @@ def test_create_token_attributes_owner_hashes_secret_and_returns_raw_once(monkey
     create_token = _get_handler(mod, "POST", "/tokens")
     resp = create_token(request=req, name="my-token")
 
-    expected_raw = "ody_" + fake_suffix
+    expected_raw = "wsp_" + fake_suffix
     expected_prefix = expected_raw[:8]
     expected_id = fake_uuid_str[:8]
 
     assert resp["token"] == expected_raw
-    assert resp["token"].startswith("ody_")
+    assert resp["token"].startswith("wsp_")
     assert resp["token_prefix"] == expected_prefix
     assert resp["id"] == expected_id
     assert resp["owner"] == "alice"
@@ -236,7 +236,7 @@ def test_list_tokens_returns_safe_display_fields_only(monkeypatch, token_routes_
         id="tok001",
         name="Production",
         owner="alice",
-        token_prefix="ody_prod",
+        token_prefix="wsp_prod",
         token_hash="$2b$12$SHOULDNEVERAPPEAR",
         scopes="chat,research",
         is_active=True,
@@ -248,7 +248,7 @@ def test_list_tokens_returns_safe_display_fields_only(monkeypatch, token_routes_
         id="tok002",
         name="Empty scopes",
         owner="bob",
-        token_prefix="ody_empt",
+        token_prefix="wsp_empt",
         token_hash="$2b$12$ALSONEVERSHOWN",
         scopes="",
         is_active=False,
@@ -355,7 +355,7 @@ def test_update_token_rename_preserves_scopes(monkeypatch, token_routes_mod):
 
     token = SimpleNamespace(
         id="tok123", name="original", owner="alice",
-        token_prefix="ody_orig", scopes="email:read,email:draft", is_active=True,
+        token_prefix="wsp_orig", scopes="email:read,email:draft", is_active=True,
     )
     fake_session = MagicMock()
     fake_session.query.return_value.filter.return_value.first.return_value = token
@@ -379,7 +379,7 @@ def test_update_token_applies_explicit_scopes(monkeypatch, token_routes_mod):
 
     token = SimpleNamespace(
         id="tok123", name="original", owner="alice",
-        token_prefix="ody_orig", scopes="email:read,email:draft", is_active=True,
+        token_prefix="wsp_orig", scopes="email:read,email:draft", is_active=True,
     )
     fake_session = MagicMock()
     fake_session.query.return_value.filter.return_value.first.return_value = token
@@ -431,7 +431,7 @@ def test_update_token_rejects_non_owner(monkeypatch, token_routes_mod):
 
     token = SimpleNamespace(
         id="tok123", name="alice-token", owner="alice",
-        token_prefix="ody_alic", scopes="chat", is_active=True,
+        token_prefix="wsp_alic", scopes="chat", is_active=True,
     )
     fake_session = MagicMock()
     fake_session.query.return_value.filter.return_value.first.return_value = token
@@ -473,7 +473,7 @@ def test_update_token_owner_check_skipped_when_auth_disabled(monkeypatch, token_
 
     token = SimpleNamespace(
         id="tok123", name="original", owner="alice",
-        token_prefix="ody_alic", scopes="chat", is_active=True,
+        token_prefix="wsp_alic", scopes="chat", is_active=True,
     )
     fake_session = MagicMock()
     fake_session.query.return_value.filter.return_value.first.return_value = token
@@ -516,7 +516,7 @@ def test_update_token_with_array_body_does_not_500(monkeypatch, token_routes_mod
 
     token = SimpleNamespace(
         id="tok123", name="original", owner="alice",
-        token_prefix="ody_orig", scopes="email:read", is_active=True,
+        token_prefix="wsp_orig", scopes="email:read", is_active=True,
     )
     fake_session = MagicMock()
     fake_session.query.return_value.filter.return_value.first.return_value = token
@@ -540,7 +540,7 @@ def test_update_token_with_null_body_does_not_500(monkeypatch, token_routes_mod)
 
     token = SimpleNamespace(
         id="tok123", name="original", owner="alice",
-        token_prefix="ody_orig", scopes="chat", is_active=True,
+        token_prefix="wsp_orig", scopes="chat", is_active=True,
     )
     fake_session = MagicMock()
     fake_session.query.return_value.filter.return_value.first.return_value = token
@@ -562,7 +562,7 @@ def test_update_token_normal_object_still_works(monkeypatch, token_routes_mod):
 
     token = SimpleNamespace(
         id="tok123", name="original", owner="alice",
-        token_prefix="ody_orig", scopes="email:read", is_active=True,
+        token_prefix="wsp_orig", scopes="email:read", is_active=True,
     )
     fake_session = MagicMock()
     fake_session.query.return_value.filter.return_value.first.return_value = token

@@ -2,7 +2,7 @@
 
 Regression test: delete_user purged cookie sessions but left ApiToken
 rows behind, so a deleted user could keep authenticating with an
-"ody_..." bearer token forever.
+"wsp_..." bearer token forever.
 """
 
 import contextlib

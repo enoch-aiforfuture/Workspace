@@ -38,7 +38,17 @@ LOOKUP = dict(REPLACEMENTS)
 
 
 def rebrand(text: str) -> str:
-    return PATTERN.sub(lambda m: LOOKUP[m.group(0)], text)
+    text = PATTERN.sub(lambda m: LOOKUP[m.group(0)], text)
+    # API token / shell prefix leftovers. Must NOT use a bare "ody_" replace:
+    # that substring sits inside ordinary English identifiers like "body_".
+    text = text.replace("Bearer ody_", "Bearer wsp_")
+    text = text.replace('"ody_', '"wsp_')
+    text = text.replace("'ody_", "'wsp_")
+    text = text.replace("ODY_USER", "WSP_USER")
+    text = text.replace("_ODY_", "_WSP_")
+    text = text.replace("_ody_", "_wsp_")
+    text = text.replace("__ody_", "__wsp_")
+    return text
 
 
 def excluded(path: str) -> bool:

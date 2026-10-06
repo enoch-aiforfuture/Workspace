@@ -415,9 +415,9 @@ if AUTH_ENABLED:
 
             # --- Bearer token auth (API tokens for external integrations) ---
             auth_header = request.headers.get("authorization", "")
-            if auth_header.startswith("Bearer ody_"):
+            if auth_header.startswith("Bearer wsp_"):
                 raw_token = auth_header[7:]
-                # Sanity check: tokens are "ody_" + 43 chars of base64
+                # Sanity check: tokens are "wsp_" + 43 chars of base64
                 if len(raw_token) < 12 or len(raw_token) > 100:
                     return JSONResponse(status_code=401, content={"error": "Invalid API token"})
                 prefix = raw_token[:8]
