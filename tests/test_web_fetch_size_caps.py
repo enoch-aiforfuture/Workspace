@@ -171,6 +171,77 @@ def test_truncated_pdf_is_an_error_not_garbage(monkeypatch, no_cache):
     assert "TooLarge" in r["error"]
 
 
+def _one_page_pdf(text: str) -> bytes:
+    """Minimal one-page PDF whose text pypdf can extract. No pdfminer required."""
+    from io import BytesIO
+
+    from pypdf import PdfWriter
+    from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=612, height=792)
+    font = DictionaryObject({
+        NameObject("/Type"): NameObject("/Font"),
+        NameObject("/Subtype"): NameObject("/Type1"),
+        NameObject("/BaseFont"): NameObject("/Helvetica"),
+    })
+    page[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/Font"): DictionaryObject({NameObject("/F1"): writer._add_object(font)}),
+    })
+    stream = DecodedStreamObject()
+    stream.set_data(f"BT /F1 24 Tf 72 700 Td ({text}) Tj ET".encode("latin-1"))
+    page[NameObject("/Contents")] = writer._add_object(stream)
+    buf = BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
+def test_pdf_text_extracted_without_pdfminer(monkeypatch, no_cache):
+    # Default and Docker installs do not ship pdfminer.six. web_fetch must
+    # still return the page text via the pypdf fallback.
+    monkeypatch.setattr(content_mod, "pdf_extract_text", None)
+    _patch_stream(
+        monkeypatch,
+        _FakeStream(_one_page_pdf("Hello PDF fallback"), content_type="application/pdf"),
+    )
+    r = content_mod.fetch_webpage_content("https://example.com/paper.pdf")
+    assert r["success"] is True
+    assert r["error"] == ""
+    assert "Hello PDF fallback" in r["content"]
+
+
+def test_pdf_text_falls_back_when_pdfminer_fails(monkeypatch, no_cache):
+    def boom(_data):
+        raise RuntimeError("pdfminer broke")
+
+    monkeypatch.setattr(content_mod, "pdf_extract_text", boom)
+    _patch_stream(
+        monkeypatch,
+        _FakeStream(_one_page_pdf("Still readable"), content_type="application/pdf"),
+    )
+    r = content_mod.fetch_webpage_content("https://example.com/paper.pdf")
+    assert r["success"] is True
+    assert "Still readable" in r["content"]
+
+
+def test_pdf_extraction_error_when_parsers_fail(monkeypatch, no_cache):
+    monkeypatch.setattr(content_mod, "pdf_extract_text", None)
+    import pypdf
+
+    class Boom:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError("bad pdf")
+
+    monkeypatch.setattr(pypdf, "PdfReader", Boom)
+    _patch_stream(
+        monkeypatch,
+        _FakeStream(b"%PDF-1.4 not a real pdf", content_type="application/pdf"),
+    )
+    r = content_mod.fetch_webpage_content("https://example.com/paper.pdf")
+    assert r["success"] is False
+    assert r["error"] == "Failed to extract PDF text"
+
+
 def test_fetch_requests_identity_encoding(monkeypatch, no_cache):
     # Compressed responses can decode to far more than Content-Length, so the
     # streamed cap and the hard-cap preflight are only honest when we refuse

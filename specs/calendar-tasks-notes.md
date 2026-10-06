@@ -100,6 +100,7 @@ Reminder dispatch is Note-owned:
 
 - `dispatch_reminder()` owns browser, email, ntfy, generic webhook, in-app notification, optional LLM reminder text, and dedupe behavior;
 - the scheduler note scanner calls note-ping actions for backend due-note delivery with per-owner notification state, and calendar-event reminders are treated as Note-owned reminders rather than separate scheduler event pings;
+- the scanner advances `due_date` for recurring notes after a successful ping, and rolls a missed occurrence forward to the next future slot, using the same daily/weekly/monthly/yearly rules as `static/js/notes.js`;
 - the notes frontend has a browser-tab fallback for visible sessions;
 - calendar frontend reminder UI stores reminder records as Notes, not calendar-event notification jobs.
 
