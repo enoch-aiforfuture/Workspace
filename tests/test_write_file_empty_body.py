@@ -27,7 +27,7 @@ RECIPE = "# Classic banana cake\n\nMash 3 bananas. Bake 180C for 1 hour.\n"
 @pytest.fixture
 def target():
     """A fresh directory under the system temp root, which _tool_path_roots allows."""
-    with tempfile.TemporaryDirectory(prefix="odysseus-6414-") as directory:
+    with tempfile.TemporaryDirectory(prefix="workspace-6414-") as directory:
         yield os.path.join(directory, "classic-banana-cake.md")
 
 

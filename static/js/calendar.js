@@ -637,7 +637,7 @@ function _restoreSidebar() {
 
 // ── Badge ──
 
-const BADGE_SEEN_KEY = 'odysseus-calendar-badge-seen';
+const BADGE_SEEN_KEY = 'workspace-calendar-badge-seen';
 
 function _todayStr() {
   const d = new Date();
@@ -700,16 +700,16 @@ function _getModal() {
 // Quick-add hint examples — the placeholder cycles through these every few
 // seconds so users see different prompt shapes (events, deadlines, recurring).
 const _QA_HINT_EXAMPLES = [
-  'return home to Ithaca 1pm tmrw',
-  'dinner with Penelope Friday 8pm',
-  'coffee with Athena 9am Saturday',
-  'call Telemachus tomorrow morning',
+  'lunch with Sam 1pm tmrw',
+  'dinner with Alex Friday 8pm',
+  'coffee with Jordan 9am Saturday',
+  'call Taylor tomorrow morning',
   'dentist appointment 3pm next Tuesday',
-  'finish the wooden horse by Friday EOD',
+  'finish the project report by Friday EOD',
   'gym 7am every weekday',
   'flight to Athens Sunday 6:30am',
-  'crew muster 10am daily',
-  'council on Ithaca Monday 2pm',
+  'team standup 10am daily',
+  'planning meeting Monday 2pm',
 ];
 function _initQuickAddHintCycle() {
   const span = document.getElementById('qa-hint-example');
@@ -933,7 +933,7 @@ function _headerHTML() {
       placeholder=" "
       autocomplete="off"
     />
-    <span class="cal-quickadd-hint" id="cal-quickadd-hint" aria-hidden="true"><span class="qa-hint-accent">Quick add</span> — <span class="qa-hint-example" id="qa-hint-example">return home to Ithaca 1pm tmrw</span> <svg class="qa-hint-enter" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg></span>
+    <span class="cal-quickadd-hint" id="cal-quickadd-hint" aria-hidden="true"><span class="qa-hint-accent">Quick add</span> — <span class="qa-hint-example" id="qa-hint-example">lunch with Sam 1pm tmrw</span> <svg class="qa-hint-enter" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></svg></span>
     <span class="cal-quickadd-status" id="cal-quickadd-status"></span>
   </div>`;
 }
@@ -1935,7 +1935,7 @@ function _wireAll(body) {
       // the day-detail pane up and down on every character.
       const alreadySet = calBody.style.getPropertyValue('--cal-detail-h');
       if (!alreadySet) {
-        const saved = parseInt(localStorage.getItem('odysseus.cal.detailH') || '0', 10);
+        const saved = parseInt(localStorage.getItem('workspace.cal.detailH') || '0', 10);
         if (saved && saved > 80) calBody.style.setProperty('--cal-detail-h', saved + 'px');
       }
       let startY = 0, startH = 240, dragging = false;
@@ -1960,7 +1960,7 @@ function _wireAll(body) {
         document.removeEventListener('touchend', onUp);
         const cur = calBody.style.getPropertyValue('--cal-detail-h');
         const px = parseInt(cur, 10);
-        if (px) { try { localStorage.setItem('odysseus.cal.detailH', String(px)); } catch {} }
+        if (px) { try { localStorage.setItem('workspace.cal.detailH', String(px)); } catch {} }
       };
       const onDown = (ev) => {
         ev.preventDefault();
@@ -1982,7 +1982,7 @@ function _wireAll(body) {
       let _lastTap = 0;
       const resetSplit = () => {
         calBody.style.removeProperty('--cal-detail-h');
-        try { localStorage.removeItem('odysseus.cal.detailH'); } catch {}
+        try { localStorage.removeItem('workspace.cal.detailH'); } catch {}
       };
       splitter.addEventListener('dblclick', resetSplit);
       splitter.addEventListener('touchend', () => {
@@ -3618,7 +3618,7 @@ function isCalendarOpen() {
 }
 
 // ── Persistent cache (localStorage) ──
-const LS_KEY = 'odysseus-calendar-cache';
+const LS_KEY = 'workspace-calendar-cache';
 const LS_TTL = 10 * 60 * 1000; // 10 min
 
 function _saveCache() {

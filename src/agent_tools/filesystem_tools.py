@@ -299,7 +299,7 @@ def _write_new_file_without_overwrite(path: str, body: str) -> None:
     """
     directory = os.path.dirname(path) or "."
     temporary_path = os.path.join(
-        directory, f".odysseus-write-{secrets.token_hex(16)}.tmp"
+        directory, f".workspace-write-{secrets.token_hex(16)}.tmp"
     )
     fd = os.open(
         temporary_path,

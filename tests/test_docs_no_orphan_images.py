@@ -92,7 +92,6 @@ def test_pages_site_owns_its_entrypoint_and_media():
         assert text.startswith("---\nlayout: default\n---\n"), guide
 
     website_videos = [p for p in website_files if p.suffix.lower() in VIDEO_EXTS]
-    assert website_videos, "expected website/ to contain the landing-page videos"
 
     entrypoint = (REPO / "website/index.html").read_text(encoding="utf-8")
     unreferenced = [

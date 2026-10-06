@@ -1,4 +1,4 @@
-"""Ithaca anchor — local-instance readiness / integrity self-check.
+"""Local-instance readiness / integrity self-check.
 
 Beyond ``/api/health``'s liveness ping, this confirms the self-hosted instance is
 whole and at home: the database is reachable, the data directory is present and

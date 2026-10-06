@@ -25,7 +25,7 @@ func parseArgs() throws -> Args {
     out.output = value(after: "--output", in: argv) ?? ""
     out.tier = value(after: "--tier", in: argv) ?? ""
     guard !out.model.isEmpty, !out.image.isEmpty, !out.output.isEmpty else {
-        throw BridgeError.usage("usage: odysseus-mlx-colorize --model weights.safetensors --image input.png --output output.png [--tier tiny|large]")
+        throw BridgeError.usage("usage: workspace-mlx-colorize --model weights.safetensors --image input.png --output output.png [--tier tiny|large]")
     }
     return out
 }

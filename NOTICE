@@ -1,0 +1,11 @@
+Workspace is a modified version of Odysseus
+(https://github.com/odysseus-dev/odysseus), imported from upstream commit
+2992bf6d368a11472323e47d3bfed91e79cefc6b.
+
+Changes made in October 2026: renamed the project, its identifiers, and its
+paths from Odysseus to Workspace; replaced logos, icons, and preview media; and
+moved the SearXNG host port from 8080 to 8088.
+
+Workspace, like Odysseus, is licensed under the GNU Affero General Public
+License v3.0. See LICENSE. Third-party notices are in ACKNOWLEDGMENTS.md and
+licenses/.

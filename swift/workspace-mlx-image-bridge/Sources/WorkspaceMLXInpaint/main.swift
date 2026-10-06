@@ -28,7 +28,7 @@ func parseArgs() throws -> Args {
     out.output = value(after: "--output", in: argv) ?? ""
     out.mode = value(after: "--mode", in: argv) ?? ""
     guard !out.model.isEmpty, !out.image.isEmpty, !out.mask.isEmpty, !out.output.isEmpty else {
-        throw BridgeError.usage("usage: odysseus-mlx-inpaint --model weights.safetensors --image input.png --mask mask.png --output output.png [--mode best|fast]")
+        throw BridgeError.usage("usage: workspace-mlx-inpaint --model weights.safetensors --image input.png --mask mask.png --output output.png [--mode best|fast]")
     }
     return out
 }

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/branding/odysseus-wordmark.png" alt="Odysseus" width="238">
+  <img src="assets/branding/workspace-wordmark.png" alt="Workspace" width="238">
 </p>
 
 <p align="center">
@@ -14,34 +14,34 @@
 </p>
 
 <p align="center">
-  <a href="https://repology.org/project/odysseus-ai/versions"><img src="https://repology.org/badge/vertical-allrepos/odysseus-ai.svg" alt="Packaging status"></a>
+  <a href="https://repology.org/project/workspace-ai/versions"><img src="https://repology.org/badge/vertical-allrepos/workspace-ai.svg" alt="Packaging status"></a>
 </p>
 
 <p align="center">
-  <img src="assets/branding/odysseus-browser.jpg" alt="Odysseus interface">
+  <img src="assets/branding/workspace-browser.jpg" alt="Workspace interface">
 </p>
 
 ---
 
 ## Quick Start
 
-> `dev` is the default branch and gets the newest changes first. Use [`main`](https://github.com/odysseus-dev/odysseus/tree/main) if you want the more curated branch.
+> `dev` is the default branch and gets the newest changes first. Use [`main`](https://github.com/enoch-aiforfuture/Workspace/tree/main) if you want the more curated branch.
 
 ```bash
-git clone https://github.com/odysseus-dev/odysseus.git
-cd odysseus
+git clone https://github.com/enoch-aiforfuture/Workspace.git
+cd workspace
 cp .env.example .env
 docker compose up -d --build
 ```
 
-Open `http://localhost:7000` when the containers are healthy. The first admin password is printed in `docker compose logs odysseus`.
+Open `http://localhost:7000` when the containers are healthy. The first admin password is printed in `docker compose logs workspace`.
 
-The compose files pull the official multi-arch image `ghcr.io/odysseus-dev/odysseus` (published by CI on every push to `main` and `dev`) and only build locally if the pull fails — so this also works on hosts without a build toolchain, e.g. as a [Portainer](https://www.portainer.io/) stack.
+The compose files pull the official multi-arch image `workspace` (published by CI on every push to `main` and `dev`) and only build locally if the pull fails — so this also works on hosts without a build toolchain, e.g. as a [Portainer](https://www.portainer.io/) stack.
 
 **Production deployments:** pin the immutable tag instead of `:latest`. `:latest` and bare `:X.Y.Z` tags move on every push to `main`, but `:X.Y.Z-<sha>` (e.g. `1.0.2-7c8070f`) always refers to one specific build:
 
 ```bash
-ODYSSEUS_IMAGE=ghcr.io/odysseus-dev/odysseus:1.0.2-7c8070f docker compose up -d
+WORKSPACE_IMAGE=workspace:1.0.2-7c8070f docker compose up -d
 ```
 
 Native installs, GPU notes, Windows/macOS instructions, HTTPS, and configuration live in the [setup guide](website/setup.md).
@@ -59,7 +59,7 @@ Native installs, GPU notes, Windows/macOS instructions, HTTPS, and configuration
 
 ## Demo
 
-A full hover-to-play tour lives on the [Odysseus landing page](https://odysseus-dev.github.io/odysseus/). Its source lives under [`website/`](website/).
+A full hover-to-play tour lives on the [Workspace landing page](https://enoch-aiforfuture.github.io/Workspace/). Its source lives under [`website/`](website/).
 
 ## Contributing
 
@@ -67,7 +67,7 @@ Help is welcome. The best entry points are fresh-install testing, provider setup
 
 ## Security
 
-Odysseus is a self-hosted workspace with powerful local tools. Keep auth enabled, keep private data out of Git, and do not expose raw model/service ports publicly.
+Workspace is a self-hosted workspace with powerful local tools. Keep auth enabled, keep private data out of Git, and do not expose raw model/service ports publicly.
 
 - Keep `AUTH_ENABLED=true` for any network-accessible deployment.
 - Keep `LOCALHOST_BYPASS=false` outside local development.
@@ -76,11 +76,11 @@ Deployment details are in the [setup guide](website/setup.md#security-notes).
 
 ## Star History
 
-<a href="https://star-history.dera.page/#odysseus-dev/odysseus&type=date&legend=top-left">
+<a href="https://star-history.dera.page/#enoch-aiforfuture/Workspace&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=odysseus-dev/odysseus&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=odysseus-dev/odysseus&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=odysseus-dev/odysseus&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=enoch-aiforfuture/Workspace&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=enoch-aiforfuture/Workspace&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=enoch-aiforfuture/Workspace&type=date&legend=top-left" />
  </picture>
 </a>
 

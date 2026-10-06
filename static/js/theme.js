@@ -32,8 +32,8 @@ export const THEMES = {
 };
 
 const DEFAULT_THEME = 'dark';
-const LS_KEY = 'odysseus-theme';
-const CUSTOM_THEMES_KEY = 'odysseus-custom-themes';
+const LS_KEY = 'workspace-theme';
+const CUSTOM_THEMES_KEY = 'workspace-custom-themes';
 
 const FONT_MAP = {
   mono: "'Fira Code', monospace",
@@ -184,7 +184,7 @@ const ADV_KEYS = [
   { key: 'aiBubbleBg',         css: '--ai-bubble-bg',      label: 'AI Chat Bubble',   group: 'Chat Bubbles' },
   { key: 'bubbleBorder',       css: '--bubble-border',     label: 'Border Chat Bubble', group: 'Chat Bubbles' },
   { key: 'sidebarBg',          css: '--sidebar-bg',        label: 'Sidebar Bg',       group: 'Sidebar' },
-  { key: 'brandColor',         css: '--brand-color',       label: 'Odysseus Logo',    group: 'Sidebar' },
+  { key: 'brandColor',         css: '--brand-color',       label: 'Workspace Logo',    group: 'Sidebar' },
   { key: 'brandMixTo',         css: '--brand-mix-to',      label: 'Logo Gradient End', group: 'Sidebar' },
   { key: 'hamburgerColor',     css: '--hamburger-color',   label: 'Hamburger Menu',   group: 'Sidebar' },
   { key: 'inputBg',            css: '--input-bg',          label: 'Input Bg',         group: 'Chat Input / Prompt Area' },
@@ -336,7 +336,7 @@ function _updateFavicon(fg) {
   if (routeShape) {
     svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>${routeShape.split('__C__').join(fg)}</svg>`;
   } else {
-    svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 4L16 22L6 22Z' fill='${fg}'/><path d='M16 8L16 22L24 22Z' fill='${fg}' opacity='0.6'/><path d='M4 24Q10 20 16 24Q22 28 28 24' stroke='${fg}' stroke-width='2.5' fill='none' stroke-linecap='round'/></svg>`;
+    svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M6 6h8v8H6Z' fill='${fg}'/><path d='M18 6h8v8h-8Z' fill='${fg}' opacity='0.6'/><path d='M6 18h8v8H6Z' fill='${fg}' opacity='0.6'/><path d='M18 18h8v8h-8Z' fill='${fg}'/></svg>`;
   }
   const href = 'data:image/svg+xml,' + encodeURIComponent(svg);
   let link = document.querySelector("link[rel='icon']");
@@ -391,7 +391,7 @@ export function applyFontDensity(font, density) {
 // UI text-size scale (accessibility). Global and independent of the active
 // theme, so the chosen size persists across theme switches. Stored as a plain
 // percentage string ('100' | '110' | '125' | '150').
-const UI_SCALE_KEY = 'odysseus-ui-scale';
+const UI_SCALE_KEY = 'workspace-ui-scale';
 const DEFAULT_UI_SCALE = '100';
 
 export function applyUiScale(scale) {
@@ -1287,7 +1287,7 @@ export function initThemeUI() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'odysseus_' + (obj.name || 'theme') + '.json';
+      a.download = 'workspace_' + (obj.name || 'theme') + '.json';
       a.click();
       URL.revokeObjectURL(url);
       newExp.innerHTML = '&#x2713; Downloaded!';
