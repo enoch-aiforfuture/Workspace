@@ -1763,7 +1763,10 @@ function _showForm(existing, initTaskType, initTriggerType) {
           return;
         }
         payload.cron_expression = cronVal;
-        payload.timezone = '';
+        // A stored IANA zone means this cron's hour and minute are local wall
+        // clock (Cookbook schedules). Clearing it would fire that hour in UTC.
+        // A task with no zone keeps the legacy UTC cron clock.
+        if (!existing?.timezone) payload.timezone = '';
       } else {
         const timeVal = _getTimePickerValue('task-form-time-wrap');
         const tz = existing?.timezone || _browserTimeZone();
