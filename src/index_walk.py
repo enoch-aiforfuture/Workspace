@@ -6,6 +6,7 @@ index (``rag_vector.index_personal_documents``) and the keyword index
 drift — the drift is what left the keyword path sweeping in `.obsidian/`,
 `.git/`, and `node_modules/` after the vector path was fixed.
 """
+import os
 from typing import List, Set
 
 # Well-known non-hidden junk directories to skip. Matched case-insensitively so
@@ -33,3 +34,20 @@ def prune_index_dirs(dirs: List[str]) -> None:
 def is_indexable_file(name: str) -> bool:
     """A file is indexable only if it is not hidden (dot-prefixed)."""
     return not name.startswith('.')
+
+
+def path_stays_inside(path: str, root: str) -> bool:
+    """True when ``path`` resolves to ``root`` or a location inside it.
+
+    ``os.walk`` does not follow directory symlinks, but opening a file symlink
+    reads the target. A notes file inside the personal-docs tree that points
+    at another user's file or ``/etc`` must not be indexed. The walk root
+    itself is also checked so a tracked directory that is a symlink out of
+    the tree is skipped (``os.walk`` still enters its start path).
+    """
+    try:
+        real = os.path.realpath(path)
+        base = os.path.realpath(root)
+        return os.path.commonpath([real, base]) == base
+    except (ValueError, OSError):
+        return False

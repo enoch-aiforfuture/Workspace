@@ -6,7 +6,7 @@ import logging
 from typing import List, Dict, Set, Any, Tuple
 from dataclasses import dataclass
 
-from src.index_walk import prune_index_dirs, is_indexable_file
+from src.index_walk import path_stays_inside, prune_index_dirs, is_indexable_file
 
 from src.markitdown_runtime import MARKITDOWN_EXTS
 
@@ -139,7 +139,9 @@ def load_personal_index(
             if not is_indexable_file(name):
                 continue
             p = os.path.join(root, name)
-            if not os.path.isfile(p):
+            if not os.path.isfile(p) or os.path.islink(p):
+                continue
+            if not path_stays_inside(p, personal_dir):
                 continue
             if not any(name.lower().endswith(ext) for ext in extensions):
                 continue
@@ -443,6 +445,13 @@ class PersonalDocsManager:
                 logger.warning(f"Path is not a directory: {directory}")
                 continue
 
+            if not path_stays_inside(directory, self.personal_dir):
+                logger.warning(
+                    "Skipping indexed directory outside personal docs: %s",
+                    directory,
+                )
+                continue
+
             # Load files from this directory
             dir_files = load_personal_index(directory)
             for f in dir_files:
@@ -513,6 +522,13 @@ class PersonalDocsManager:
         for directory in self.indexed_directories:
             if not os.path.exists(directory):
                 logger.warning(f"Skipping non-existent directory: {directory}")
+                failure_count += 1
+                continue
+            if not path_stays_inside(directory, self.personal_dir):
+                logger.warning(
+                    "Skipping indexed directory outside personal docs: %s",
+                    directory,
+                )
                 failure_count += 1
                 continue
             
