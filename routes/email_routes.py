@@ -1510,6 +1510,24 @@ def _sanitize_email_html(raw: str) -> str:
     return f"<html><body>{inner}</body></html>"
 
 
+def _reject_foreign_workspace_item(db, kind: str, row, owner: str) -> None:
+    """Refuse a compose attachment the caller does not own.
+
+    An empty owner is auth-off single-user mode. A named caller must own the
+    document or gallery row. A null owner is not shared.
+    """
+    if not owner:
+        return
+    if kind == "document":
+        from routes.document.document_helpers import _verify_doc_owner
+        _verify_doc_owner(db, row, owner)
+        return
+    if kind == "gallery":
+        from routes.gallery.gallery_helpers import _caller_owns
+        if not _caller_owns(getattr(row, "owner", None), owner):
+            raise HTTPException(status_code=404, detail="Image not found")
+
+
 def setup_email_routes():
     _start_poller()
     router = APIRouter(prefix="/api/email", tags=["email"])
@@ -4068,19 +4086,12 @@ def setup_email_routes():
 
     def _load_workspace_attachment_source(db, kind: str, item_id: str, owner: str):
         from core.database import Document as _Doc, GalleryImage as _GI
-        from core.database import Session as _Sess
 
         if kind == "document":
             doc = db.query(_Doc).filter(_Doc.id == item_id, _Doc.is_active == True).first()
             if not doc:
                 raise HTTPException(status_code=404, detail="Document not found")
-            if owner:
-                if doc.owner and doc.owner != owner:
-                    raise HTTPException(status_code=404, detail="Document not found")
-                if not doc.owner and doc.session_id:
-                    sess = db.query(_Sess).filter(_Sess.id == doc.session_id).first()
-                    if sess and sess.owner and sess.owner != owner:
-                        raise HTTPException(status_code=404, detail="Document not found")
+            _reject_foreign_workspace_item(db, "document", doc, owner)
             lang = (doc.language or "text").strip().lower()
             ext = {
                 "markdown": "md",
@@ -4102,8 +4113,7 @@ def setup_email_routes():
             img = db.query(_GI).filter(_GI.id == item_id, _GI.is_active == True).first()
             if not img:
                 raise HTTPException(status_code=404, detail="Image not found")
-            if owner and img.owner and img.owner != owner:
-                raise HTTPException(status_code=404, detail="Image not found")
+            _reject_foreign_workspace_item(db, "gallery", img, owner)
             from routes.gallery.gallery_routes import _gallery_image_path
             src = _gallery_image_path(img.filename)
             if not src.exists() or not src.is_file():
@@ -6093,8 +6103,10 @@ def setup_email_routes():
             row = db.query(EmailAccount).filter(EmailAccount.id == account_id).first()
             if not row:
                 return _RR("/?section=integrations&email_oauth_error=account_not_found")
-            # SECURITY: verify the account belongs to the initiating user.
-            if owner and row.owner and row.owner != owner:
+            # SECURITY: same visibility rule as the rest of email. The old
+            # `row.owner and row.owner != owner` check let a signed state
+            # write tokens onto a null-owner mailbox the caller does not own.
+            if owner and not _account_visible_to_owner(row, owner):
                 logger.warning("OAuth callback owner mismatch — rejecting token write")
                 return _RR("/?section=integrations&email_oauth_error=ownership_error")
 

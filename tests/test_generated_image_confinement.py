@@ -64,6 +64,25 @@ def test_generated_image_headers_include_nosniff():
     )
 
 
+def test_generated_image_null_owner_is_not_shared():
+    generated_images = _generated_images_module()
+    assert generated_images.generated_image_owned_by(None, None) is True
+    assert generated_images.generated_image_owned_by("alice", "alice") is True
+    assert generated_images.generated_image_owned_by(None, "alice") is False
+    assert generated_images.generated_image_owned_by("bob", "alice") is False
+
+
+def test_generated_image_route_requires_a_user_and_compares_owner():
+    source = Path("app.py").read_text(encoding="utf-8")
+    start = source.find("async def serve_generated_image")
+    assert start != -1
+    chunk = source[start:source.find("# ========= YOUTUBE INIT", start)]
+    assert "require_user(request)" in chunk
+    assert "get_current_user(" not in chunk
+    assert "_row.owner and" not in chunk
+    assert "generated_image_owned_by" in chunk
+
+
 def test_generated_image_route_uses_confining_resolver():
     source = Path("app.py").read_text(encoding="utf-8")
 

@@ -518,16 +518,24 @@ async def serve_generated_image(filename: str, request: Request):
     # 12-hex content hash could pull another user's image bytes. Require
     # auth and verify ownership via the gallery row (when one exists).
     try:
-        from src.auth_helpers import get_current_user
+        from src.auth_helpers import require_user
+        from src.generated_images import generated_image_owned_by
         from core.database import SessionLocal as _SL, GalleryImage as _GI
-        _user = get_current_user(request)
+        if getattr(request.state, "api_token", False):
+            _user = getattr(request.state, "api_token_owner", None) or None
+            if not _user:
+                raise HTTPException(status_code=401, detail="Not authenticated")
+        else:
+            # require_user, not bare get_current_user. A missing identity used
+            # to skip the owner check and serve the file.
+            _user = require_user(request) or None
         if _user:
             _db = _SL()
             try:
                 _row = _db.query(_GI).filter(_GI.filename == filename).first()
-                # Generated-but-not-yet-imported images have no row → allow.
-                # Row exists with a different owner → 404 (don't confirm existence).
-                if _row is not None and _row.owner and _row.owner != _user:
+                # No gallery row yet: the generator writes the file, then the
+                # row. A row with a null owner is not shared with named users.
+                if _row is not None and not generated_image_owned_by(_row.owner, _user):
                     raise HTTPException(status_code=404, detail="Image not found")
             finally:
                 _db.close()
@@ -535,6 +543,7 @@ async def serve_generated_image(filename: str, request: Request):
         raise
     except Exception as _e:
         logger.warning("Image ownership verification failed for %r", filename, exc_info=_e)
+        raise HTTPException(status_code=503, detail="Image ownership check failed") from _e
     ext = filename.rsplit('.', 1)[-1].lower()
     mime = {
         "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
