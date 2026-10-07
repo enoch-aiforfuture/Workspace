@@ -14,6 +14,8 @@ import ast
 import os
 from pathlib import Path
 
+import pytest
+
 SRC = Path(__file__).resolve().parent.parent / "routes" / "personal_routes.py"
 
 
@@ -26,15 +28,18 @@ def _function_source(src_text, name):
 
 
 def test_confinement_uses_realpath_not_abspath():
-    body = _function_source(SRC.read_text(), "_resolve_allowed_personal_dir")
-    assert "os.path.realpath" in body, (
-        "_resolve_allowed_personal_dir must use os.path.realpath so a symlink "
+    helper_src = Path(__file__).resolve().parent.parent / "src" / "personal_docs.py"
+    helper = _function_source(helper_src.read_text(), "resolve_personal_documents_dir")
+    assert "os.path.realpath" in helper, (
+        "resolve_personal_documents_dir must use os.path.realpath so a symlink "
         "inside PERSONAL_DIR cannot escape the confinement check"
     )
-    assert "os.path.abspath" not in body, (
+    assert "os.path.abspath" not in helper, (
         "os.path.abspath does not resolve symlinks; the confinement check must "
         "not rely on it"
     )
+    route = _function_source(SRC.read_text(), "_resolve_allowed_personal_dir")
+    assert "resolve_personal_documents_dir(" in route
 
 
 def test_realpath_catches_symlink_escape(tmp_path):
@@ -52,3 +57,19 @@ def test_realpath_catches_symlink_escape(tmp_path):
     assert os.path.commonpath([os.path.abspath(base / "escape"), os.path.abspath(base)]) == os.path.abspath(base)
     # realpath: the symlink resolves to `outside` -> escape detected
     assert os.path.commonpath([os.path.realpath(link), base_abs]) != base_abs
+
+
+def test_resolve_personal_documents_dir_rejects_symlink_escape(tmp_path):
+    from src.personal_docs import resolve_personal_documents_dir
+
+    base = tmp_path / "personal"
+    base.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    os.symlink(outside, base / "escape")
+
+    with pytest.raises(ValueError, match="personal documents"):
+        resolve_personal_documents_dir(str(base / "escape"), base=str(base))
+
+    inside = resolve_personal_documents_dir("notes", base=str(base))
+    assert inside == os.path.realpath(base / "notes")

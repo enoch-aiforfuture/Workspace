@@ -105,9 +105,13 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         directory = _dir.strip() if isinstance(_dir, str) else ""
         if not directory:
             return [TextContent(type="text", text="Error: add_directory needs a directory path")]
-        # Store an absolute path so indexed `source` metadata is absolute and
-        # remove_directory (which abspath-normalizes) can match it later (#1660).
-        directory = os.path.abspath(os.path.expanduser(directory))
+        # Confine to the personal-docs tree, then store the real path so
+        # indexed `source` metadata matches remove_directory (#1660).
+        from src.personal_docs import resolve_personal_documents_dir
+        try:
+            directory = resolve_personal_documents_dir(directory)
+        except ValueError as exc:
+            return [TextContent(type="text", text=f"Error: {exc}")]
         if not os.path.isdir(directory):
             return [TextContent(type="text", text=f"Error: Directory not found: {directory}")]
         if not _rag_manager:
@@ -133,9 +137,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         directory = _dir.strip() if isinstance(_dir, str) else ""
         if not directory:
             return [TextContent(type="text", text="Error: remove_directory needs a directory path")]
-        # Expand ~ to match add_directory, which indexes the expanded path.
-        # Without this, removing "~/docs" never matches the stored absolute path.
-        directory = os.path.expanduser(directory)
+        from src.personal_docs import resolve_personal_documents_dir
+        try:
+            directory = resolve_personal_documents_dir(directory)
+        except ValueError as exc:
+            return [TextContent(type="text", text=f"Error: {exc}")]
         if not _personal_docs_manager:
             return [TextContent(type="text", text="Error: Personal docs manager not available")]
         try:
