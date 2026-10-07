@@ -276,11 +276,13 @@ def request_pinned(
     headers: Optional[dict] = None,
     json: Optional[object] = None,
     content: Optional[bytes] = None,
+    auth=None,
 ) -> httpx.Response:
     """One request, no redirects, connected only to the checked addresses.
 
-    Embedding and similar calls attach a bearer token. Following a redirect
-    or re-resolving DNS would send that token to a different host.
+    Embedding calls attach a bearer token and CardDAV calls attach basic
+    auth. Following a redirect or re-resolving DNS would send those
+    credentials to a different host.
     """
     ips = resolve_pinned_ips(url, block_private=block_private)
     with httpx.Client(
@@ -288,6 +290,7 @@ def request_pinned(
         follow_redirects=False,
         timeout=timeout,
     ) as client:
-        return client.request(
-            method, url, headers=headers, json=json, content=content
-        )
+        request_kwargs = {"headers": headers, "json": json, "content": content}
+        if auth is not None:
+            request_kwargs["auth"] = auth
+        return client.request(method, url, **request_kwargs)
