@@ -196,22 +196,29 @@ async def arequest_pinned(
     headers: Optional[dict] = None,
     json: Optional[object] = None,
     content: Optional[bytes | str] = None,
+    data: Optional[dict] = None,
+    files: Optional[dict] = None,
 ) -> httpx.Response:
     """One request, no redirects, connected only to the checked addresses.
 
     Reminder webhooks, ntfy, and image generation attach a bearer token.
-    Following a redirect or re-resolving DNS would send that token to a
-    different host.
+    Gallery edits attach that token to a multipart body. Following a
+    redirect or re-resolving DNS would send that token to a different host.
+    ``data`` and ``files`` are omitted unless the caller set them, so
+    existing JSON callers stay on the same request signature.
     """
     ips = resolve_pinned_ips(url, block_private=block_private)
+    request_kwargs = {"headers": headers, "json": json, "content": content}
+    if data is not None:
+        request_kwargs["data"] = data
+    if files is not None:
+        request_kwargs["files"] = files
     async with httpx.AsyncClient(
         transport=_PinnedAsyncTransport(ips),
         follow_redirects=False,
         timeout=timeout,
     ) as client:
-        return await client.request(
-            method, url, headers=headers, json=json, content=content
-        )
+        return await client.request(method, url, **request_kwargs)
 
 
 class _PinnedBackend(httpcore.NetworkBackend):

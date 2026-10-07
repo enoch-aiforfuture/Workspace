@@ -361,6 +361,41 @@ async def _fetch_result_image_b64(url: str) -> Optional[str]:
     return None
 
 
+def _image_block_private() -> bool:
+    return os.getenv("IMAGE_BLOCK_PRIVATE_IPS", "false").lower() == "true"
+
+
+async def _post_pinned_gallery(
+    url: str,
+    *,
+    timeout: float,
+    headers: Optional[dict] = None,
+    json: Optional[object] = None,
+    data: Optional[dict] = None,
+    files: Optional[dict] = None,
+):
+    """POST an image-proxy body on the address snapshot from the safety check.
+
+    These calls carry the endpoint API key and the user's image. A plain
+    client would resolve the host again after ``check_outbound_url``.
+    """
+    from src.pinned_fetch import PinnedFetchError, arequest_pinned
+
+    try:
+        return await arequest_pinned(
+            "POST",
+            url,
+            headers=headers,
+            json=json,
+            data=data,
+            files=files,
+            block_private=_image_block_private(),
+            timeout=timeout,
+        )
+    except PinnedFetchError as exc:
+        raise HTTPException(502, f"Image endpoint rejected: {exc}") from exc
+
+
 def setup_gallery_routes() -> APIRouter:
     router = APIRouter(tags=["gallery"])
 
@@ -576,7 +611,7 @@ def setup_gallery_routes() -> APIRouter:
     @router.post("/api/gallery/ai-upscale")
     async def gallery_ai_upscale(request: Request):
         """AI upscale using img2img with the diffusion server."""
-        import base64, httpx
+        import base64
 
         user = require_privilege(request, "can_generate_images")
         form = await request.form()
@@ -603,15 +638,16 @@ def setup_gallery_routes() -> APIRouter:
 
         # Use img2img endpoint if available, otherwise upscale via canvas on client
         try:
-            async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(f"{base_url}/images/upscale", json={
-                    "image": b64, "scale": scale,
-                })
-                if resp.status_code == 200:
-                    data = resp.json()
-                    return {"image": data.get("data", [{}])[0].get("b64_json", "")}
-                # Fallback: no upscale endpoint — return error
-                return {"error": f"Upscale endpoint not available ({resp.status_code})"}
+            resp = await _post_pinned_gallery(
+                _join_checked_gallery_endpoint(base_url, "/images/upscale"),
+                json={"image": b64, "scale": scale},
+                timeout=120,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return {"image": data.get("data", [{}])[0].get("b64_json", "")}
+            # Fallback: no upscale endpoint — return error
+            return {"error": f"Upscale endpoint not available ({resp.status_code})"}
         except Exception:
             logger.exception("ai_upscale: request failed")
             return {"error": "Upscale request failed"}
@@ -620,7 +656,7 @@ def setup_gallery_routes() -> APIRouter:
     @router.post("/api/gallery/style-transfer")
     async def gallery_style_transfer(request: Request):
         """Style transfer using img2img with the diffusion server."""
-        import base64, httpx
+        import base64
 
         user = require_privilege(request, "can_generate_images")
         form = await request.form()
@@ -646,19 +682,22 @@ def setup_gallery_routes() -> APIRouter:
             base_url += "/v1"
 
         try:
-            async with httpx.AsyncClient(timeout=180) as client:
-                resp = await client.post(f"{base_url}/images/generations", json={
+            resp = await _post_pinned_gallery(
+                _join_checked_gallery_endpoint(base_url, "/images/generations"),
+                json={
                     "prompt": prompt,
                     "image": b64,
                     "strength": strength,
                     "response_format": "b64_json",
-                })
-                if resp.status_code == 200:
-                    data = resp.json()
-                    img_data = data.get("data", [{}])[0].get("b64_json", "")
-                    if img_data:
-                        return {"image": img_data}
-                return {"error": f"Style transfer failed ({resp.status_code})"}
+                },
+                timeout=180,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                img_data = data.get("data", [{}])[0].get("b64_json", "")
+                if img_data:
+                    return {"image": img_data}
+            return {"error": f"Style transfer failed ({resp.status_code})"}
         except Exception:
             logger.exception("style_transfer: request failed")
             return {"error": "Style transfer failed"}
@@ -1389,47 +1428,52 @@ def setup_gallery_routes() -> APIRouter:
             }
             headers = {"Authorization": f"Bearer {api_key}"}
             try:
-                async with httpx.AsyncClient(timeout=120) as client:
-                    r = await client.post(_join_checked_gallery_endpoint(base, "/images/edits"), headers=headers, data=data, files=files)
-                    if r.status_code != 200:
-                        logger.error("inpaint_proxy OpenAI edit: status %s", r.status_code)
-                        raise HTTPException(r.status_code, "OpenAI edit failed")
-                    result = r.json()
-                    raw_b64 = None
-                    if result.get("data"):
-                        item = result["data"][0]
-                        # gpt-image-1 returns b64_json by default; dall-e-2 may return url
-                        if item.get("b64_json"):
-                            raw_b64 = item["b64_json"]
-                        elif item.get("url"):
-                            raw_b64 = await _fetch_result_image_b64(item["url"])
-                    if not raw_b64:
-                        raise HTTPException(502, "OpenAI returned no image")
+                r = await _post_pinned_gallery(
+                    _join_checked_gallery_endpoint(base, "/images/edits"),
+                    headers=headers,
+                    data=data,
+                    files=files,
+                    timeout=120,
+                )
+                if r.status_code != 200:
+                    logger.error("inpaint_proxy OpenAI edit: status %s", r.status_code)
+                    raise HTTPException(r.status_code, "OpenAI edit failed")
+                result = r.json()
+                raw_b64 = None
+                if result.get("data"):
+                    item = result["data"][0]
+                    # gpt-image-1 returns b64_json by default; dall-e-2 may return url
+                    if item.get("b64_json"):
+                        raw_b64 = item["b64_json"]
+                    elif item.get("url"):
+                        raw_b64 = await _fetch_result_image_b64(item["url"])
+                if not raw_b64:
+                    raise HTTPException(502, "OpenAI returned no image")
 
-                    # OpenAI's edits API doesn't truly preserve unmasked
-                    # pixels — gpt-image-1 regenerates the whole image,
-                    # so even areas the user didn't mask come back
-                    # slightly different. Composite the model output onto
-                    # the ORIGINAL source using the user's mask, so only
-                    # the masked region actually changes.
-                    try:
-                        generated = Image.open(io.BytesIO(base64.b64decode(raw_b64))).convert("RGBA")
-                        # Match the generated image to the source dims.
-                        if generated.size != source_png.size:
-                            generated = generated.resize(source_png.size, Image.LANCZOS)
-                        # mask_png: white = regenerate (use generated),
-                        #           black = keep (use source).
-                        # Composite: result = source * (1 - mask_norm) + generated * mask_norm
-                        # Image.composite does exactly that with `mask`.
-                        blended = Image.composite(generated, source_png, mask_png)
-                        out_buf = io.BytesIO()
-                        blended.save(out_buf, format="PNG")
-                        return {"image": base64.b64encode(out_buf.getvalue()).decode()}
-                    except Exception as comp_err:
-                        # If compositing fails for any reason, fall back
-                        # to the raw OpenAI output rather than blocking.
-                        logger.warning(f"Inpaint compose failed, returning raw: {comp_err}")
-                        return {"image": raw_b64}
+                # OpenAI's edits API doesn't truly preserve unmasked
+                # pixels — gpt-image-1 regenerates the whole image,
+                # so even areas the user didn't mask come back
+                # slightly different. Composite the model output onto
+                # the ORIGINAL source using the user's mask, so only
+                # the masked region actually changes.
+                try:
+                    generated = Image.open(io.BytesIO(base64.b64decode(raw_b64))).convert("RGBA")
+                    # Match the generated image to the source dims.
+                    if generated.size != source_png.size:
+                        generated = generated.resize(source_png.size, Image.LANCZOS)
+                    # mask_png: white = regenerate (use generated),
+                    #           black = keep (use source).
+                    # Composite: result = source * (1 - mask_norm) + generated * mask_norm
+                    # Image.composite does exactly that with `mask`.
+                    blended = Image.composite(generated, source_png, mask_png)
+                    out_buf = io.BytesIO()
+                    blended.save(out_buf, format="PNG")
+                    return {"image": base64.b64encode(out_buf.getvalue()).decode()}
+                except Exception as comp_err:
+                    # If compositing fails for any reason, fall back
+                    # to the raw OpenAI output rather than blocking.
+                    logger.warning(f"Inpaint compose failed, returning raw: {comp_err}")
+                    return {"image": raw_b64}
             except httpx.TimeoutException:
                 raise HTTPException(504, "OpenAI inpaint timed out (120s)")
 
@@ -1443,77 +1487,85 @@ def setup_gallery_routes() -> APIRouter:
             # supports multiple models per process. Harmless if ignored.
             if chosen_model:
                 body["model"] = chosen_model
-            async with httpx.AsyncClient(timeout=240) as client:
-                try:
-                    import base64, io
-                    from PIL import Image
+            try:
+                import base64, io
+                from PIL import Image
 
-                    img_bytes = base64.b64decode(body["image"])
-                    mask_bytes = base64.b64decode(body["mask"])
-                    # Normalize both inputs to PNG bytes. Local MLX and
-                    # Diffusers wrappers expect white mask pixels to mean
-                    # "edit this region", which matches the editor's mask.
-                    source_png = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
-                    mask_png = Image.open(io.BytesIO(mask_bytes)).convert("L")
-                    src_buf = io.BytesIO()
-                    source_png.save(src_buf, format="PNG")
-                    mask_buf = io.BytesIO()
-                    mask_png.save(mask_buf, format="PNG")
-                    files = {
-                        "image": ("source.png", src_buf.getvalue(), "image/png"),
-                        "mask": ("mask.png", mask_buf.getvalue(), "image/png"),
-                    }
-                    data = {
-                        "model": chosen_model or body.get("model") or "",
-                        "prompt": body.get("prompt", ""),
-                        "size": f"{int(body.get('width') or source_png.width)}x{int(body.get('height') or source_png.height)}",
-                        "n": "1",
-                    }
-                    r = await client.post(_join_checked_gallery_endpoint(base, "/images/edits"), data=data, files=files)
-                    if r.status_code == 200:
-                        result = r.json()
-                        if isinstance(result, dict) and result.get("data"):
-                            item = result["data"][0]
-                            if item.get("b64_json"):
-                                return {"image": item["b64_json"]}
-                            if item.get("url"):
-                                raw_b64 = await _fetch_result_image_b64(item["url"])
-                                if raw_b64:
-                                    return {"image": raw_b64}
-                        if isinstance(result, dict) and result.get("image"):
-                            return {"image": result["image"]}
-                        raise HTTPException(502, "Image edit endpoint returned no image")
-                    if r.status_code not in (404, 405):
-                        logger.warning("inpaint_proxy self-hosted edits: status %s", r.status_code)
-                        detail = "Image edit request failed"
-                        try:
-                            err = r.json()
-                            detail = err.get("detail") or err.get("error") or detail
-                        except Exception:
-                            pass
-                        # A plain SD/SDXL checkpoint often exposes
-                        # generation only at /images/edits.
-                        # That does not mean the endpoint cannot inpaint:
-                        # Workspace diffusion_server.py has a dedicated
-                        # /images/inpaint route that can derive/fallback to
-                        # inpaint, img2img crop+composite, or txt2img
-                        # crop+composite. Fall through to that route instead
-                        # of surfacing "does not support image edits".
-                        if r.status_code == 400 and "does not support image edits" in str(detail).lower():
-                            logger.info("inpaint_proxy self-hosted edits unsupported; falling back to /images/inpaint")
-                        else:
-                            raise HTTPException(r.status_code, detail)
-                except HTTPException:
-                    raise
-                except Exception:
-                    logger.exception("inpaint_proxy: failed to prepare self-hosted edit request")
-                    raise HTTPException(400, "Failed to prepare inpaint request")
+                img_bytes = base64.b64decode(body["image"])
+                mask_bytes = base64.b64decode(body["mask"])
+                # Normalize both inputs to PNG bytes. Local MLX and
+                # Diffusers wrappers expect white mask pixels to mean
+                # "edit this region", which matches the editor's mask.
+                source_png = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
+                mask_png = Image.open(io.BytesIO(mask_bytes)).convert("L")
+                src_buf = io.BytesIO()
+                source_png.save(src_buf, format="PNG")
+                mask_buf = io.BytesIO()
+                mask_png.save(mask_buf, format="PNG")
+                files = {
+                    "image": ("source.png", src_buf.getvalue(), "image/png"),
+                    "mask": ("mask.png", mask_buf.getvalue(), "image/png"),
+                }
+                data = {
+                    "model": chosen_model or body.get("model") or "",
+                    "prompt": body.get("prompt", ""),
+                    "size": f"{int(body.get('width') or source_png.width)}x{int(body.get('height') or source_png.height)}",
+                    "n": "1",
+                }
+                r = await _post_pinned_gallery(
+                    _join_checked_gallery_endpoint(base, "/images/edits"),
+                    data=data,
+                    files=files,
+                    timeout=240,
+                )
+                if r.status_code == 200:
+                    result = r.json()
+                    if isinstance(result, dict) and result.get("data"):
+                        item = result["data"][0]
+                        if item.get("b64_json"):
+                            return {"image": item["b64_json"]}
+                        if item.get("url"):
+                            raw_b64 = await _fetch_result_image_b64(item["url"])
+                            if raw_b64:
+                                return {"image": raw_b64}
+                    if isinstance(result, dict) and result.get("image"):
+                        return {"image": result["image"]}
+                    raise HTTPException(502, "Image edit endpoint returned no image")
+                if r.status_code not in (404, 405):
+                    logger.warning("inpaint_proxy self-hosted edits: status %s", r.status_code)
+                    detail = "Image edit request failed"
+                    try:
+                        err = r.json()
+                        detail = err.get("detail") or err.get("error") or detail
+                    except Exception:
+                        pass
+                    # A plain SD/SDXL checkpoint often exposes
+                    # generation only at /images/edits.
+                    # That does not mean the endpoint cannot inpaint:
+                    # Workspace diffusion_server.py has a dedicated
+                    # /images/inpaint route that can derive/fallback to
+                    # inpaint, img2img crop+composite, or txt2img
+                    # crop+composite. Fall through to that route instead
+                    # of surfacing "does not support image edits".
+                    if r.status_code == 400 and "does not support image edits" in str(detail).lower():
+                        logger.info("inpaint_proxy self-hosted edits unsupported; falling back to /images/inpaint")
+                    else:
+                        raise HTTPException(r.status_code, detail)
+            except HTTPException:
+                raise
+            except Exception:
+                logger.exception("inpaint_proxy: failed to prepare self-hosted edit request")
+                raise HTTPException(400, "Failed to prepare inpaint request")
 
-                r = await client.post(_join_checked_gallery_endpoint(base, "/images/inpaint"), json=body)
-                if r.status_code != 200:
-                    logger.error("inpaint_proxy diffusion: status %s", r.status_code)
-                    raise HTTPException(r.status_code, "Inpaint request failed")
-                return r.json()
+            r = await _post_pinned_gallery(
+                _join_checked_gallery_endpoint(base, "/images/inpaint"),
+                json=body,
+                timeout=240,
+            )
+            if r.status_code != 200:
+                logger.error("inpaint_proxy diffusion: status %s", r.status_code)
+                raise HTTPException(r.status_code, "Inpaint request failed")
+            return r.json()
         except httpx.TimeoutException:
             raise HTTPException(504, "Inpaint request timed out (240s)")
         except HTTPException:
@@ -1676,52 +1728,53 @@ def setup_gallery_routes() -> APIRouter:
         # Cold-start SDXL inpaint can take 60-90s on first request (loading
         # weights to GPU). 240s gives headroom for both that and a full
         # 1024×1024 inference pass on slower setups.
-        async with httpx.AsyncClient(timeout=240) as client:
-            for path, kind, payload in candidates:
-                _effective_base = base_root if path.startswith("/sdapi") else base
-                target = _join_checked_gallery_endpoint(_effective_base, path)
-                try:
-                    r = await client.post(target, json=payload, headers=headers)
-                    if r.status_code == 404:
-                        last_err = f"{path}: 404"
-                        continue  # try next variant
-                    if r.status_code != 200:
-                        logger.warning("harmonize: %s returned %s", path, r.status_code)
-                        last_err = f"{path}: {r.status_code}"
-                        continue
-                    data = r.json()
-                    # Normalise return shape.
-                    if isinstance(data, dict):
-                        # Server returned 200 with an explicit error field —
-                        # surface it now instead of trying the other routes
-                        # (otherwise the real error gets buried under 404s).
-                        if data.get("error") and not data.get("image"):
-                            logger.warning("harmonize: server error at %s: %s", path, data.get("error"))
-                            raise HTTPException(502, f"Diffusion server error at {path}")
-                        if data.get("image"):
-                            return {"image": data["image"]}
-                        if data.get("images") and isinstance(data["images"], list):
-                            img0 = data["images"][0]
-                            if isinstance(img0, str):
-                                # A1111 sometimes returns "data:image/png;base64,..." prefix
-                                if img0.startswith("data:"):
-                                    img0 = img0.split(",", 1)[1]
-                                return {"image": img0}
-                        # OpenAI-style {"data":[{"b64_json": ...}]}
-                        if data.get("data"):
-                            item = data["data"][0]
-                            if item.get("b64_json"):
-                                return {"image": item["b64_json"]}
-                            if item.get("url"):
-                                img_b64 = await _fetch_result_image_b64(item["url"])
-                                if img_b64:
-                                    return {"image": img_b64}
-                    last_err = f"{path}: server returned no image"
-                except httpx.ConnectError:
-                    logger.warning("harmonize: can't reach diffusion server at %s", base)
-                    raise HTTPException(502, "Can't reach diffusion server")
-                except httpx.TimeoutException:
-                    raise HTTPException(504, "Harmonize timed out (240s) — restart the diffusion server or lower Color match / disable Seam fix")
+        for path, kind, payload in candidates:
+            _effective_base = base_root if path.startswith("/sdapi") else base
+            target = _join_checked_gallery_endpoint(_effective_base, path)
+            try:
+                r = await _post_pinned_gallery(
+                    target, json=payload, headers=headers, timeout=240,
+                )
+                if r.status_code == 404:
+                    last_err = f"{path}: 404"
+                    continue  # try next variant
+                if r.status_code != 200:
+                    logger.warning("harmonize: %s returned %s", path, r.status_code)
+                    last_err = f"{path}: {r.status_code}"
+                    continue
+                data = r.json()
+                # Normalise return shape.
+                if isinstance(data, dict):
+                    # Server returned 200 with an explicit error field —
+                    # surface it now instead of trying the other routes
+                    # (otherwise the real error gets buried under 404s).
+                    if data.get("error") and not data.get("image"):
+                        logger.warning("harmonize: server error at %s: %s", path, data.get("error"))
+                        raise HTTPException(502, f"Diffusion server error at {path}")
+                    if data.get("image"):
+                        return {"image": data["image"]}
+                    if data.get("images") and isinstance(data["images"], list):
+                        img0 = data["images"][0]
+                        if isinstance(img0, str):
+                            # A1111 sometimes returns "data:image/png;base64,..." prefix
+                            if img0.startswith("data:"):
+                                img0 = img0.split(",", 1)[1]
+                            return {"image": img0}
+                    # OpenAI-style {"data":[{"b64_json": ...}]}
+                    if data.get("data"):
+                        item = data["data"][0]
+                        if item.get("b64_json"):
+                            return {"image": item["b64_json"]}
+                        if item.get("url"):
+                            img_b64 = await _fetch_result_image_b64(item["url"])
+                            if img_b64:
+                                return {"image": img_b64}
+                last_err = f"{path}: server returned no image"
+            except httpx.ConnectError:
+                logger.warning("harmonize: can't reach diffusion server at %s", base)
+                raise HTTPException(502, "Can't reach diffusion server")
+            except httpx.TimeoutException:
+                raise HTTPException(504, "Harmonize timed out (240s) — restart the diffusion server or lower Color match / disable Seam fix")
         raise HTTPException(502,
             "No supported img2img route responded. "
             "Your diffusion server needs to expose one of: "
@@ -2244,7 +2297,7 @@ def setup_gallery_routes() -> APIRouter:
     @router.post("/api/gallery/{image_id}/ai-tag")
     async def ai_tag_image(request: Request, image_id: str):
         """Send image to vision model for auto-tagging."""
-        import base64, httpx
+        import base64
         from pathlib import Path
 
         user = get_current_user(request)
@@ -2323,17 +2376,18 @@ def setup_gallery_routes() -> APIRouter:
             if headers:
                 h.update(headers)
 
-            async with httpx.AsyncClient(timeout=60) as client:
-                resp = await client.post(chat_url, json=payload, headers=h)
-                if resp.status_code != 200:
-                    logger.error("ai_tag vision model: status %s: %s", resp.status_code, resp.text[:500])
-                    return {"error": "Vision model request failed"}
-                data = resp.json()
-                # Anthropic returns content[0].text, OpenAI returns choices[0].message.content
-                if provider == "anthropic":
-                    content = (data.get("content") or [{}])[0].get("text", "")
-                else:
-                    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            resp = await _post_pinned_gallery(
+                chat_url, json=payload, headers=h, timeout=60,
+            )
+            if resp.status_code != 200:
+                logger.error("ai_tag vision model: status %s: %s", resp.status_code, resp.text[:500])
+                return {"error": "Vision model request failed"}
+            data = resp.json()
+            # Anthropic returns content[0].text, OpenAI returns choices[0].message.content
+            if provider == "anthropic":
+                content = (data.get("content") or [{}])[0].get("text", "")
+            else:
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
             # Clean up tags
             tags = [t.strip().lower() for t in content.split(",") if t.strip()]
