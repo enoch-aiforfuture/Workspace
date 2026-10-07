@@ -38,6 +38,48 @@ TASK_DEFAULT_SHELL_TOOLS = frozenset({
 })
 
 
+async def fetch_miniflux_unread(base_url: str, headers: dict) -> str | None:
+    """GET unread Miniflux entries, pinned to the address the safety check allowed.
+
+    The API token travels with this request. Redirects are not followed, and a
+    fresh DNS lookup cannot move the connect onto a different address. Private
+    and loopback addresses stay allowed unless
+    ``INTEGRATION_API_BLOCK_PRIVATE_IPS`` is set, matching ``execute_api_call``.
+    """
+    import os
+    from urllib.parse import urlencode
+
+    from src.pinned_fetch import arequest_pinned
+
+    query = urlencode({
+        "status": "unread",
+        "limit": 15,
+        "order": "published_at",
+        "direction": "desc",
+    })
+    url = f"{base_url.rstrip('/')}/v1/entries?{query}"
+    block_private = os.getenv("INTEGRATION_API_BLOCK_PRIVATE_IPS", "false").lower() == "true"
+    resp = await arequest_pinned(
+        "GET",
+        url,
+        headers=headers,
+        block_private=block_private,
+        timeout=10,
+    )
+    if resp.status_code != 200:
+        return None
+    entries = resp.json().get("entries", []) or []
+    if not entries:
+        return None
+    lines = []
+    for entry in entries[:15]:
+        title = entry.get("title", "?")
+        feed = (entry.get("feed") or {}).get("title", "?")
+        entry_url = entry.get("url", "")
+        lines.append(f"- [{feed}] {title} — {entry_url}")
+    return "\n".join(lines)
+
+
 def compose_task_relevant_tools(rag_tools, assistant_always, disabled_tools):
     """Compose the relevant-tools set offered to a scheduled task's agent.
 
@@ -1605,7 +1647,6 @@ class TaskScheduler:
 
         # Auto-discover API integrations (Miniflux RSS, etc.).
         try:
-            import httpx
             from src.integrations import load_integrations
             for integ in load_integrations():
                 if not integ.get("enabled"):
@@ -1626,24 +1667,7 @@ class TaskScheduler:
                 # Miniflux: fetch unread entries (cached 3 min across tasks)
                 if preset == "miniflux":
                     async def _fetch_miniflux(_base=base_url, _headers=dict(headers)):
-                        async with httpx.AsyncClient(timeout=10) as client:
-                            resp = await client.get(
-                                f"{_base}/v1/entries",
-                                params={"status": "unread", "limit": 15, "order": "published_at", "direction": "desc"},
-                                headers=_headers,
-                            )
-                            if resp.status_code != 200:
-                                return None
-                            entries = resp.json().get("entries", []) or []
-                            if not entries:
-                                return None
-                            lines = []
-                            for e in entries[:15]:
-                                title = e.get("title", "?")
-                                feed = (e.get("feed") or {}).get("title", "?")
-                                url = e.get("url", "")
-                                lines.append(f"- [{feed}] {title} — {url}")
-                            return "\n".join(lines)
+                        return await fetch_miniflux_unread(_base, _headers)
                     try:
                         val = await _cached(("miniflux_unread", base_url), 180, _fetch_miniflux)
                         if val:
