@@ -79,14 +79,30 @@ def _bind(monkeypatch, module, factory):
     monkeypatch.setattr(module, "SessionLocal", factory)
 
 
+def _real_routes():
+    """Drop route modules an earlier test rebound to a stubbed database."""
+    import importlib
+
+    import routes.compare_routes as compare_routes
+    import routes.editor_draft_routes as editor_draft_routes
+    import routes.signature_routes as signature_routes
+
+    for module, attr, real in (
+        (editor_draft_routes, "EditorDraft", cdb.EditorDraft),
+        (signature_routes, "Signature", cdb.Signature),
+        (compare_routes, "Comparison", cdb.Comparison),
+    ):
+        if getattr(module, attr, None) is not real:
+            importlib.reload(module)
+    return signature_routes, editor_draft_routes, compare_routes
+
+
 @pytest.mark.asyncio
 async def test_no_identity_cannot_read_signatures_drafts_prefs_or_comparisons(monkeypatch, db):
     monkeypatch.setenv("AUTH_ENABLED", "true")
     monkeypatch.delenv("LOCALHOST_BYPASS", raising=False)
-    import routes.signature_routes as signature_routes
-    import routes.editor_draft_routes as editor_draft_routes
+    signature_routes, editor_draft_routes, compare_routes = _real_routes()
     import routes.prefs_routes as prefs_routes
-    import routes.compare_routes as compare_routes
 
     _bind(monkeypatch, signature_routes, db)
     _bind(monkeypatch, editor_draft_routes, db)
@@ -122,9 +138,7 @@ async def test_no_identity_cannot_read_signatures_drafts_prefs_or_comparisons(mo
 @pytest.mark.asyncio
 async def test_auth_disabled_lists_the_single_user_library(monkeypatch, db):
     monkeypatch.setenv("AUTH_ENABLED", "false")
-    import routes.signature_routes as signature_routes
-    import routes.editor_draft_routes as editor_draft_routes
-    import routes.compare_routes as compare_routes
+    signature_routes, editor_draft_routes, compare_routes = _real_routes()
 
     _bind(monkeypatch, signature_routes, db)
     _bind(monkeypatch, editor_draft_routes, db)
@@ -143,7 +157,7 @@ async def test_auth_disabled_lists_the_single_user_library(monkeypatch, db):
 
 def test_named_user_cannot_delete_another_signature(monkeypatch, db):
     monkeypatch.setenv("AUTH_ENABLED", "true")
-    import routes.signature_routes as signature_routes
+    signature_routes, _, _ = _real_routes()
 
     _bind(monkeypatch, signature_routes, db)
     delete = _endpoint(signature_routes.setup_signature_routes(), "DELETE", "/api/signatures/{sig_id}")
