@@ -49,8 +49,8 @@ def test_delete_file_refuses_symlink_directory_escape(tmp_path, monkeypatch):
 
     assert result["deleted_from_disk"] is False
     assert victim.read_text(encoding="utf-8") == "keep me"
-    assert docs.excluded == [filepath]
-    assert rag.deleted_sources == [filepath]
+    assert docs.excluded == []
+    assert rag.deleted_sources == []
 
 
 def test_delete_file_removes_regular_file_inside_upload_root(tmp_path, monkeypatch):
@@ -93,3 +93,28 @@ def test_delete_file_refuses_other_owners_upload(tmp_path, monkeypatch):
 
     assert result["deleted_from_disk"] is False
     assert victim.read_text(encoding="utf-8") == "keep me"
+    assert docs.excluded == []
+    assert rag.deleted_sources == []
+
+
+def test_delete_file_unindexes_personal_docs_without_unlinking(tmp_path, monkeypatch):
+    personal = tmp_path / "personal_docs"
+    personal.mkdir()
+    note = personal / "notes.txt"
+    note.write_text("indexed", encoding="utf-8")
+    uploads = tmp_path / "uploads"
+    uploads.mkdir()
+
+    docs = _FakePersonalDocs()
+    rag = _FakeRAG()
+    monkeypatch.setattr(personal_routes, "UPLOADS_DIR", str(uploads))
+    monkeypatch.setattr(personal_routes, "PERSONAL_DIR", str(personal))
+    monkeypatch.setattr(personal_routes, "get_rag_manager", lambda: rag)
+
+    filepath = str(note)
+    result = asyncio.run(_delete_endpoint(docs)(filepath=filepath, owner="alice", _admin=None))
+
+    assert result["deleted_from_disk"] is False
+    assert note.read_text(encoding="utf-8") == "indexed"
+    assert docs.excluded == [filepath]
+    assert rag.deleted_sources == [filepath]

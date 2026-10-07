@@ -411,9 +411,44 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
     async def delete_file_from_rag(filepath: str = Query(...), owner: str = Depends(require_user), _admin: None = Depends(require_admin)):
         """Delete a specific file from RAG index and optionally from disk."""
         try:
+            def _inside(path: str, root: str) -> bool:
+                try:
+                    return os.path.commonpath([path, root]) == root
+                except ValueError:
+                    # commonpath raises on mixed drives / non-comparable paths
+                    return False
+
             def _delete_file():
-                # Remove chunks from RAG vector store (best-effort)
+                # Disk, the vector index, and the global exclusion list are one
+                # decision. delete_by_source and exclude_file key off the path
+                # alone, so running them for a path outside the caller's own
+                # uploads (or the shared personal-docs tree) lets one admin
+                # wipe another user's chunks or hide their file from the index.
                 removed = 0
+                deleted_from_disk = False
+                try:
+                    abs_target = os.path.realpath(filepath)
+                    owner_base = os.path.realpath(
+                        _personal_upload_dir_for_owner(owner, create=False)
+                    )
+                    uploads_root = os.path.realpath(UPLOADS_DIR)
+                    personal_root = os.path.realpath(PERSONAL_DIR)
+                except ValueError:
+                    return removed, deleted_from_disk
+
+                in_owner_uploads = _inside(abs_target, owner_base) and abs_target != owner_base
+                in_any_uploads = _inside(abs_target, uploads_root)
+                in_personal_docs = (
+                    _inside(abs_target, personal_root) and abs_target != personal_root
+                )
+                # A path under the shared uploads root belongs to one owner.
+                # Anything else is allowed only when it is a real file inside
+                # the personal-docs tree (single-file unindex). Symlinks are
+                # resolved first, so a link that lands outside both roots is
+                # refused.
+                if not in_owner_uploads and (in_any_uploads or not in_personal_docs):
+                    return removed, deleted_from_disk
+
                 rag = _rag()
                 if rag:
                     try:
@@ -421,28 +456,13 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
                     except Exception as e:
                         logger.warning(f"RAG removal failed for {filepath}: {e}")
 
-                # Delete file from disk if it's in the caller's own uploads dir.
-                # Scope to the per-owner subdir, not the shared uploads root, so one
-                # admin can't delete another user's personal files by path.
-                deleted_from_disk = False
-                try:
-                    abs_target = os.path.realpath(filepath)
-                    base_abs = os.path.realpath(_personal_upload_dir_for_owner(owner, create=False))
-                    in_uploads = (
-                        abs_target == base_abs
-                        or os.path.commonpath([abs_target, base_abs]) == base_abs
-                    )
-                except ValueError:
-                    # commonpath raises on mixed drives / non-comparable paths
-                    in_uploads = False
-                if in_uploads and abs_target != base_abs:
+                if in_owner_uploads:
                     try:
                         os.remove(abs_target)
                         deleted_from_disk = True
                     except FileNotFoundError:
                         pass  # already gone — race with another request or cleanup
 
-                # Exclude the file from the listing (persists across restarts)
                 personal_docs_manager.exclude_file(filepath)
                 return removed, deleted_from_disk
 
