@@ -1,4 +1,4 @@
-"""GET a URL after the SSRF check, pinned to that check's address snapshot.
+"""HTTP after the SSRF check, pinned to that check's address snapshot.
 
 ``check_outbound_url`` resolves the host and then returns. A later ``httpx``
 client resolves it again, so a name that answered with a public address for
@@ -185,3 +185,109 @@ async def aget_pinned(
             continue
         return response
     raise PinnedFetchError("too many redirects")
+
+
+class _PinnedBackend(httpcore.NetworkBackend):
+    """Sync connect limited to one validated address snapshot."""
+
+    def __init__(self, ips: list):
+        self._ips = [str(ip) for ip in ips]
+        self._real = httpcore.SyncBackend()
+
+    def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+        deadline = None if timeout is None else time.monotonic() + timeout
+        last_exc: Optional[Exception] = None
+        for ip in self._ips:
+            remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+            try:
+                return self._real.connect_tcp(
+                    ip, port, remaining, local_address, socket_options
+                )
+            except (httpcore.ConnectError, httpcore.ConnectTimeout) as exc:
+                last_exc = exc
+                if deadline is not None and time.monotonic() >= deadline:
+                    break
+        if last_exc is not None:
+            raise last_exc
+        raise httpcore.ConnectError("no validated address available")
+
+    def connect_unix_socket(self, path, timeout=None, socket_options=None):
+        return self._real.connect_unix_socket(path, timeout, socket_options)
+
+    def sleep(self, seconds: float) -> None:
+        return self._real.sleep(seconds)
+
+
+class _PinnedTransport(httpx.BaseTransport):
+    """Sync transport that pins the socket and keeps the request URL."""
+
+    def __init__(self, ips: list):
+        self._pinned_ips = list(ips)
+        self._pool = httpcore.ConnectionPool(
+            ssl_context=httpx.create_ssl_context(),
+            http1=True,
+            http2=False,
+            network_backend=_PinnedBackend(ips),
+        )
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        core_request = httpcore.Request(
+            method=request.method,
+            url=httpcore.URL(
+                scheme=request.url.raw_scheme,
+                host=request.url.raw_host,
+                port=request.url.port,
+                target=request.url.raw_path,
+            ),
+            headers=request.headers.raw,
+            content=request.stream,
+            extensions=request.extensions,
+        )
+        core_response = None
+        try:
+            core_response = self._pool.handle_request(core_request)
+            content = b"".join(core_response.stream)
+        except Exception as exc:
+            mapped = _HTTPCORE_TO_HTTPX_EXC.get(type(exc))
+            if mapped is not None:
+                raise mapped(str(exc)) from exc
+            raise
+        finally:
+            if core_response is not None:
+                core_response.close()
+        return httpx.Response(
+            status_code=core_response.status,
+            headers=core_response.headers,
+            content=content,
+            extensions=core_response.extensions,
+            request=request,
+        )
+
+    def close(self) -> None:
+        self._pool.close()
+
+
+def request_pinned(
+    method: str,
+    url: str,
+    *,
+    block_private: bool = False,
+    timeout: float = 10.0,
+    headers: Optional[dict] = None,
+    json: Optional[object] = None,
+    content: Optional[bytes] = None,
+) -> httpx.Response:
+    """One request, no redirects, connected only to the checked addresses.
+
+    Embedding and similar calls attach a bearer token. Following a redirect
+    or re-resolving DNS would send that token to a different host.
+    """
+    ips = resolve_pinned_ips(url, block_private=block_private)
+    with httpx.Client(
+        transport=_PinnedTransport(ips),
+        follow_redirects=False,
+        timeout=timeout,
+    ) as client:
+        return client.request(
+            method, url, headers=headers, json=json, content=content
+        )
