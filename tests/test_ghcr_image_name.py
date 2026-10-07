@@ -1,0 +1,38 @@
+"""GHCR image names must be lowercase.
+
+``github.repository`` keeps the GitHub repo's original casing. Publishing
+``ghcr.io/enoch-aiforfuture/Workspace`` fails with "repository name must be
+lowercase". The docker publish workflow lowercases that ref before every
+tag and push.
+"""
+import os
+import subprocess
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+WORKFLOW = REPO / ".github/workflows/docker-publish.yml"
+
+
+def test_docker_publish_lowercases_image_name_before_push():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "IMAGE_NAME: ${{ github.repository }}" not in workflow
+    assert workflow.count("${GITHUB_REPOSITORY,,}") == 2
+    assert workflow.count("id: image") == 2
+    assert "name=${{ env.REGISTRY }}/${{ steps.image.outputs.name }}" in workflow
+    assert "images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}" in workflow
+    assert workflow.count("IMAGE_NAME: ${{ steps.image.outputs.name }}") == 2
+
+
+def test_bash_lowercase_matches_ghcr_repository_rule():
+    """The workflow's ${VAR,,} expansion is what buildx will actually receive."""
+    result = subprocess.run(
+        ["bash", "-c", 'name="${GITHUB_REPOSITORY,,}"; printf "%s" "$name"'],
+        env={**os.environ, "GITHUB_REPOSITORY": "enoch-aiforfuture/Workspace"},
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=10,
+    )
+    assert result.stdout == "enoch-aiforfuture/workspace"
+    assert result.stdout == result.stdout.lower()
