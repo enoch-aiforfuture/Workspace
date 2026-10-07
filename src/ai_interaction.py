@@ -964,7 +964,7 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
     import httpx
     import os
     from pathlib import Path
-    from src.url_safety import check_outbound_url
+    from src.pinned_fetch import PinnedFetchError, aget_pinned
 
     lines = content.strip().split("\n")
     prompt = lines[0].strip() if lines else ""
@@ -1154,28 +1154,31 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
                 image_id = _save_to_gallery(filename)
 
             elif img.get("url"):
-                # Download external URL and save locally (DALL-E returns temp URLs)
+                # Download external URL and save locally (DALL-E returns temp URLs).
+                # Pin the connect to the addresses the safety check just allowed,
+                # and re-check every redirect. A plain httpx.get re-resolves DNS
+                # and would follow a 3xx to link-local metadata.
                 result_url = img["url"]
-                ok, reason = check_outbound_url(
-                    result_url,
-                    block_private=os.getenv("IMAGE_BLOCK_PRIVATE_IPS", "false").lower() == "true",
-                )
-                if not ok:
-                    return {"error": f"Image API returned unsafe image URL: {reason}"}
+                block_private = os.getenv("IMAGE_BLOCK_PRIVATE_IPS", "false").lower() == "true"
                 try:
-                    dl_resp = httpx.get(result_url, timeout=60)
-                    if dl_resp.status_code == 200:
-                        img_dir = Path(GENERATED_IMAGES_DIR)
-                        img_dir.mkdir(parents=True, exist_ok=True)
-                        filename = f"{uuid.uuid4().hex[:12]}.png"
-                        img_path = img_dir / filename
-                        img_path.write_bytes(dl_resp.content)
-                        image_url = f"/api/generated-image/{filename}"
-                        image_id = _save_to_gallery(filename)
-                    else:
-                        image_url = result_url  # fallback to external URL
+                    dl_resp = await aget_pinned(
+                        result_url, block_private=block_private, timeout=60
+                    )
+                except PinnedFetchError as exc:
+                    return {"error": f"Image API returned unsafe image URL: {exc}"}
                 except Exception as _dl_e:
                     logger.warning(f"Failed to download DALL-E image: {_dl_e}")
+                    image_url = result_url
+                    dl_resp = None
+                if dl_resp is not None and dl_resp.status_code == 200:
+                    img_dir = Path(GENERATED_IMAGES_DIR)
+                    img_dir.mkdir(parents=True, exist_ok=True)
+                    filename = f"{uuid.uuid4().hex[:12]}.png"
+                    img_path = img_dir / filename
+                    img_path.write_bytes(dl_resp.content)
+                    image_url = f"/api/generated-image/{filename}"
+                    image_id = _save_to_gallery(filename)
+                elif dl_resp is not None:
                     image_url = result_url  # fallback to external URL
             else:
                 return {"error": "Image API returned unexpected format (no b64_json or url)"}
@@ -1215,7 +1218,7 @@ async def do_edit_image(
     import mimetypes
     import os
     from pathlib import Path
-    from src.url_safety import check_outbound_url
+    from src.pinned_fetch import PinnedFetchError, aget_pinned
 
     prompt = (prompt or "").strip()
     if not prompt:
@@ -1438,13 +1441,13 @@ async def do_edit_image(
                 image_url, image_id = _save_image_bytes(base64.b64decode(img.get("b64_json")))
             elif img.get("url"):
                 result_url = img["url"]
-                ok, reason = check_outbound_url(
-                    result_url,
-                    block_private=os.getenv("IMAGE_BLOCK_PRIVATE_IPS", "false").lower() == "true",
-                )
-                if not ok:
-                    return {"error": f"Image edit API returned unsafe image URL: {reason}"}
-                dl_resp = httpx.get(result_url, timeout=60)
+                block_private = os.getenv("IMAGE_BLOCK_PRIVATE_IPS", "false").lower() == "true"
+                try:
+                    dl_resp = await aget_pinned(
+                        result_url, block_private=block_private, timeout=60
+                    )
+                except PinnedFetchError as exc:
+                    return {"error": f"Image edit API returned unsafe image URL: {exc}"}
                 if dl_resp.status_code != 200:
                     return {"error": f"Could not download edited image ({dl_resp.status_code})"}
                 image_url, image_id = _save_image_bytes(dl_resp.content)

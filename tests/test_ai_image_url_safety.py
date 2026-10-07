@@ -1,3 +1,7 @@
+"""Provider image URLs are downloaded by this process. The download must use
+the addresses that passed the safety check, and must not follow a redirect
+until that hop is checked too.
+"""
 from src import ai_interaction
 
 
@@ -15,15 +19,18 @@ class _GenerationResponse:
 class _DownloadResponse:
     status_code = 503
     content = b""
+    headers = {}
+    url = "https://images.example.com/generated.png?sig=abc"
 
 
-def _patch_generation(monkeypatch, image_url):
-    async def _post(self, url, json, headers):
-        return _GenerationResponse(image_url)
+def _patch_generation(monkeypatch, image_url, *, on_get=None, resolver=None):
+    created = []
 
     class _AsyncClient:
         def __init__(self, *args, **kwargs):
-            pass
+            self.kwargs = kwargs
+            self.gets = []
+            created.append(self)
 
         async def __aenter__(self):
             return self
@@ -31,7 +38,14 @@ def _patch_generation(monkeypatch, image_url):
         async def __aexit__(self, *exc):
             return False
 
-        post = _post
+        async def post(self, url, json, headers):
+            return _GenerationResponse(image_url)
+
+        async def get(self, url, **kwargs):
+            self.gets.append(url)
+            if on_get is not None:
+                return on_get(url)
+            return _DownloadResponse()
 
     import httpx
     import src.settings as settings
@@ -47,58 +61,40 @@ def _patch_generation(monkeypatch, image_url):
             {"Authorization": "Bearer test"},
         ),
     )
+    if resolver is not None:
+        monkeypatch.setattr("src.url_safety._default_resolver", resolver)
+    return created
 
 
-async def test_generate_image_validates_provider_url_before_download(monkeypatch):
-    import httpx
-    import src.url_safety as url_safety
+async def test_generate_image_pins_provider_download(monkeypatch):
+    from src.pinned_fetch import _PinnedAsyncTransport
 
     provider_url = "https://images.example.com/generated.png?sig=abc"
-    events = []
-    _patch_generation(monkeypatch, provider_url)
-
-    def _check_outbound_url(url, *, block_private=False):
-        events.append(("check", url, block_private))
-        return True, "ok"
-
-    def _get(url, *, timeout):
-        events.append(("get", url, timeout))
-        return _DownloadResponse()
-
-    monkeypatch.setattr(url_safety, "check_outbound_url", _check_outbound_url)
-    monkeypatch.setattr(httpx, "get", _get)
+    created = _patch_generation(
+        monkeypatch,
+        provider_url,
+        resolver=lambda host: ["93.184.216.34"],
+    )
 
     result = await ai_interaction.do_generate_image("draw a chair\ndall-e-3")
 
+    downloads = [client for client in created if client.gets]
     assert result["image_url"] == provider_url
-    assert events == [
-        ("check", provider_url, False),
-        ("get", provider_url, 60),
-    ]
+    assert len(downloads) == 1
+    client = downloads[0]
+    assert client.gets == [provider_url]
+    assert client.kwargs.get("follow_redirects") is False
+    transport = client.kwargs.get("transport")
+    assert isinstance(transport, _PinnedAsyncTransport)
+    assert [str(ip) for ip in transport._pinned_ips] == ["93.184.216.34"]
 
 
 async def test_generate_image_rejects_unsafe_provider_url_without_download(monkeypatch):
-    import httpx
-    import src.url_safety as url_safety
-
     unsafe_url = "http://169.254.169.254/latest/meta-data"
-    events = []
-    _patch_generation(monkeypatch, unsafe_url)
-
-    def _check_outbound_url(url, *, block_private=False):
-        events.append(("check", url, block_private))
-        return False, "link-local address blocked (SSRF metadata risk): 169.254.169.254"
-
-    def _get(url, *, timeout):
-        raise AssertionError("unsafe provider image URL must not be downloaded")
-
-    monkeypatch.setattr(url_safety, "check_outbound_url", _check_outbound_url)
-    monkeypatch.setattr(httpx, "get", _get)
+    created = _patch_generation(monkeypatch, unsafe_url)
 
     result = await ai_interaction.do_generate_image("draw a chair\ndall-e-3")
 
-    assert result["error"] == (
-        "Image API returned unsafe image URL: "
-        "link-local address blocked (SSRF metadata risk): 169.254.169.254"
-    )
-    assert events == [("check", unsafe_url, False)]
+    assert result["error"].startswith("Image API returned unsafe image URL:")
+    assert "169.254.169.254" in result["error"]
+    assert all(client.gets == [] for client in created)
