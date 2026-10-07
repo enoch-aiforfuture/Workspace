@@ -158,9 +158,14 @@ async def test_api_chat_auto_model_fetch_sends_the_key_on_a_pinned_request(monke
 
 
 def _auth_tester(monkeypatch, integration):
-    monkeypatch.setattr("routes.auth_routes.get_integration", lambda _id: integration)
-    monkeypatch.setattr(
-        "routes.auth_routes._load_settings",
+    # Other tests drop routes.auth_routes from sys.modules and import a new
+    # copy. Patch the globals of the function this module already imported,
+    # which is the function the route below actually calls.
+    module_globals = setup_auth_routes.__globals__
+    monkeypatch.setitem(module_globals, "get_integration", lambda _id: integration)
+    monkeypatch.setitem(
+        module_globals,
+        "_load_settings",
         lambda: {"reminder_ntfy_topic": "reminders"},
     )
 
