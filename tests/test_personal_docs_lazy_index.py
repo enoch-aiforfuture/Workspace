@@ -9,7 +9,9 @@ def test_index_is_not_built_during_init(tmp_path, monkeypatch):
     personal = tmp_path / "personal"
     personal.mkdir()
     (personal / "note.md").write_text("hello personal")
-    extra = tmp_path / "extra"
+    # Additional directories must stay inside the personal-docs tree. A path
+    # whose realpath leaves that tree is skipped and would not be walked.
+    extra = personal / "library"
     extra.mkdir()
     (extra / "other.md").write_text("there")
     (personal / "indexed_directories.json").write_text(json.dumps([str(extra)]))
@@ -32,7 +34,7 @@ def test_index_is_not_built_during_init(tmp_path, monkeypatch):
 
     assert calls["n"] == 2
     assert "note.md" in names
-    assert "extra/other.md" in names
+    assert "library/other.md" in names
     assert mgr._index_ready is True
 
     again = mgr.index
