@@ -13,7 +13,6 @@ import csv
 import io
 import os
 import inspect
-import httpx
 from pathlib import Path
 from datetime import datetime
 from urllib.parse import urljoin, urlparse, urlunparse
@@ -76,6 +75,26 @@ def _validate_carddav_url(url: str) -> str:
 
 def _carddav_base_url(cfg: Dict) -> str:
     return _validate_carddav_url(cfg.get("url") or "")
+
+
+def _carddav_request(method: str, url: str, *, auth=None, headers=None, content=None, timeout: float = 10):
+    """One CardDAV request, pinned to the address the safety check allowed.
+
+    The username and password travel with this request. Redirects are not
+    followed: a Location target is a different host until it is checked, and
+    a fresh DNS lookup can point the same name at a different address.
+    """
+    from src.pinned_fetch import request_pinned
+
+    return request_pinned(
+        method,
+        url,
+        headers=headers,
+        content=content,
+        auth=auth,
+        timeout=timeout,
+        block_private=os.getenv("CARDDAV_BLOCK_PRIVATE_IPS", "false").lower() == "true",
+    )
 
 
 def _normalize_contact(contact: Dict) -> Dict:
@@ -302,7 +321,7 @@ def _fetch_via_report(cfg, auth):
     `href` field, or None if the server doesn't support it / errors."""
     from defusedxml import ElementTree as ET
     try:
-        r = httpx.request(
+        r = _carddav_request(
             "REPORT", cfg["url"],
             content=_ADDRESSBOOK_QUERY.encode("utf-8"),
             headers={"Content-Type": "application/xml; charset=utf-8", "Depth": "1"},
@@ -360,7 +379,7 @@ def _fetch_contacts(force=False):
         contacts = _fetch_via_report(cfg, auth)
         if contacts is None:
             # Fallback: plain GET, concatenated vCards, no hrefs.
-            r = httpx.get(cfg["url"], auth=auth, timeout=10)
+            r = _carddav_request("GET", cfg["url"], auth=auth, timeout=10)
             if r.status_code != 200:
                 logger.warning(f"CardDAV returned {r.status_code}")
                 return _contact_cache["contacts"]
@@ -423,9 +442,10 @@ def _create_contact(name: str, email: str = "", address: str = "", phones: Optio
         auth = None
         if cfg["username"]:
             auth = (cfg["username"], cfg["password"])
-        r = httpx.put(
+        r = _carddav_request(
+            "PUT",
             url,
-            data=vcard.encode("utf-8"),
+            content=vcard.encode("utf-8"),
             headers={"Content-Type": "text/vcard; charset=utf-8"},
             auth=auth,
             timeout=10,
@@ -513,8 +533,8 @@ def _import_vcards(text: str) -> Dict:
         vcard = block.replace("\n", "\r\n") + "\r\n"
         url = base_url + "/" + quote(uid, safe="") + ".vcf"
         try:
-            r = httpx.put(
-                url, data=vcard.encode("utf-8"),
+            r = _carddav_request(
+                "PUT", url, content=vcard.encode("utf-8"),
                 headers={"Content-Type": "text/vcard; charset=utf-8"},
                 auth=auth, timeout=15,
             )
@@ -677,9 +697,10 @@ def _update_contact(uid: str, name: str, emails: List[str], phones: List[str], a
     try:
         url = _resolve_resource_url(uid)
         auth = (cfg["username"], cfg["password"]) if cfg["username"] else None
-        r = httpx.put(
+        r = _carddav_request(
+            "PUT",
             url,
-            data=vcard.encode("utf-8"),
+            content=vcard.encode("utf-8"),
             headers={"Content-Type": "text/vcard; charset=utf-8"},
             auth=auth,
             timeout=10,
@@ -706,7 +727,7 @@ def _delete_contact(uid: str) -> bool:
     try:
         url = _resolve_resource_url(uid)
         auth = (cfg["username"], cfg["password"]) if cfg["username"] else None
-        r = httpx.delete(url, auth=auth, timeout=10)
+        r = _carddav_request("DELETE", url, auth=auth, timeout=10)
         if r.status_code in (200, 204, 404):
             # Invalidate cache so the next fetch sees the server truth.
             _contact_cache["fetched_at"] = None
