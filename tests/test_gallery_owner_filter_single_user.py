@@ -14,7 +14,7 @@ from sqlalchemy.pool import NullPool
 
 import core.database as cdb
 from core.database import GalleryImage
-from routes.gallery_helpers import _owner_filter
+from routes.gallery_helpers import _caller_owns, _owner_filter
 
 _TMPDB = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _ENGINE = create_engine(f"sqlite:///{_TMPDB.name}", connect_args={"check_same_thread": False}, poolclass=NullPool)
@@ -62,3 +62,17 @@ def test_none_user_blocks_when_auth_is_enabled(monkeypatch):
         assert _owner_filter(db.query(GalleryImage), None).count() == 0
     finally:
         db.close()
+
+
+def test_caller_owns_matches_list_policy(monkeypatch):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    assert _caller_owns("alice", None) is True
+    assert _caller_owns(None, None) is True
+    assert _caller_owns("bob", "alice") is False
+    assert _caller_owns("alice", "alice") is True
+
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    assert _caller_owns("alice", None) is False
+    assert _caller_owns(None, None) is False
+    assert _caller_owns("bob", "alice") is False
+    assert _caller_owns("alice", "alice") is True

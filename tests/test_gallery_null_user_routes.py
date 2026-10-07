@@ -147,3 +147,83 @@ def test_authenticated_gallery_routes_remain_owner_scoped(monkeypatch, tmp_path)
         "total_untagged": 1,
         "image_ids": ["img-alice"],
     }
+
+
+def test_auth_disabled_null_user_can_mutate_gallery(monkeypatch, tmp_path):
+    """Listing already shows every row when auth is off. Mutations must too."""
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    client = _client_with_gallery(monkeypatch, tmp_path)
+
+    got = client.get("/api/gallery/img-alice")
+    assert got.status_code == 200
+    assert got.json()["id"] == "img-alice"
+
+    renamed = client.post("/api/gallery/img-bob/rename", json={"name": "Bob renamed"})
+    assert renamed.status_code == 200
+    assert renamed.json()["name"] == "Bob renamed"
+
+    patched = client.patch("/api/gallery/img-alice", json={"tags": "sunset"})
+    assert patched.status_code == 200
+    assert "sunset" in patched.json()["tags"]
+
+    favorite = client.post("/api/gallery/img-alice/favorite")
+    assert favorite.status_code == 200
+    assert favorite.json()["favorite"] is True
+
+    album = client.put("/api/gallery/albums/album-bob", json={"name": "Shared"})
+    assert album.status_code == 200
+
+    added = client.post(
+        "/api/gallery/albums/album-alice/add",
+        json={"image_ids": ["img-bob"]},
+    )
+    assert added.status_code == 200
+
+    removed = client.delete("/api/gallery/img-bob")
+    assert removed.status_code == 200
+
+
+def test_auth_enabled_null_user_mutations_fail_closed(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    client = _client_with_gallery(monkeypatch, tmp_path)
+
+    assert client.get("/api/gallery/img-alice").status_code == 404
+    assert client.post("/api/gallery/img-alice/rename", json={"name": "Nope"}).status_code == 403
+    assert client.patch("/api/gallery/img-alice", json={"tags": "nope"}).status_code == 404
+    assert client.post("/api/gallery/img-alice/favorite").status_code == 404
+    assert client.put("/api/gallery/albums/album-alice", json={"name": "Nope"}).status_code == 404
+    assert client.delete("/api/gallery/img-alice").status_code == 404
+    assert client.post("/api/gallery/download-zip", json={"ids": ["img-alice"]}).status_code == 401
+
+
+def test_auth_disabled_download_zip_includes_every_photo(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    client = _client_with_gallery(monkeypatch, tmp_path)
+    img_dir = tmp_path / "images"
+    img_dir.mkdir()
+    monkeypatch.setattr(gallery_routes, "GALLERY_IMAGE_DIR", img_dir)
+    library = client.get("/api/gallery/library").json()
+    for item in library["items"]:
+        (img_dir / item["filename"]).write_bytes(b"png-bytes")
+
+    resp = client.post(
+        "/api/gallery/download-zip",
+        json={"ids": ["img-alice", "img-bob"]},
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/zip")
+    assert len(resp.content) > 0
+
+
+def test_named_user_still_cannot_touch_another_owners_photo(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setattr(gallery_routes, "get_current_user", lambda request: "alice")
+    client = _client_with_gallery(monkeypatch, tmp_path)
+
+    assert client.get("/api/gallery/img-alice").status_code == 200
+    assert client.get("/api/gallery/img-bob").status_code == 404
+    assert client.post("/api/gallery/img-bob/rename", json={"name": "Stolen"}).status_code == 403
+    assert client.patch("/api/gallery/img-bob", json={"favorite": True}).status_code == 404
+    assert client.post("/api/gallery/img-bob/favorite").status_code == 404
+    assert client.put("/api/gallery/albums/album-bob", json={"name": "Stolen"}).status_code == 404
+    assert client.delete("/api/gallery/img-bob").status_code == 404
