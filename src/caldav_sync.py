@@ -262,6 +262,73 @@ def _open_url_as_calendar(client, url: str):
     return client.calendar(url=target)
 
 
+def _caldav_pinned_getaddrinfo(original, host, port, args, kwargs):
+    """Return one DNS snapshot, or reject a hostname that is not allowed.
+
+    IP literals are returned unchanged: there is no name to rebind, and the
+    redirect test speaks to ``127.0.0.1`` directly. A hostname is checked
+    with the same address rules as ``validate_caldav_url``. The records
+    returned here are the ones the socket connects to.
+    """
+    host_s = host.decode("ascii", "replace") if isinstance(host, (bytes, bytearray)) else str(host or "")
+    literal = host_s.strip("[]")
+    try:
+        ipaddress.ip_address(literal)
+        is_literal = True
+    except ValueError:
+        is_literal = False
+    results = original(host, port, *args, **kwargs)
+    if is_literal:
+        return results
+    if not results:
+        raise OSError("CalDAV host did not resolve to a usable address")
+    for record in results:
+        sockaddr = record[4]
+        ip_text = str(sockaddr[0]).split("%", 1)[0]
+        try:
+            addr = ipaddress.ip_address(ip_text)
+        except ValueError as exc:
+            raise OSError("CalDAV host did not resolve to a usable address") from exc
+        try:
+            _validate_caldav_address(addr)
+        except ValueError as exc:
+            raise OSError(str(exc)) from exc
+    return results
+
+
+def _pin_resolver(resolver) -> None:
+    """Patch ``resolver.getaddrinfo`` in place so the pool identity stays put."""
+    if resolver is None or getattr(resolver, "_caldav_pinned", False):
+        return
+    original = resolver.getaddrinfo
+
+    def getaddrinfo(host, port, *args, **kwargs):
+        return _caldav_pinned_getaddrinfo(original, host, port, args, kwargs)
+
+    resolver.getaddrinfo = getaddrinfo
+    original_recycle = getattr(resolver, "recycle", None)
+    if original_recycle is not None:
+        def recycle():
+            fresh = original_recycle()
+            _pin_resolver(fresh)
+            return fresh
+
+        resolver.recycle = recycle
+    resolver._caldav_pinned = True
+
+
+def _pin_caldav_session(session) -> None:
+    """Keep each adapter's resolver, and make its lookups CalDAV-aware."""
+    adapters = getattr(session, "adapters", None)
+    if not adapters:
+        return
+    for adapter in list(adapters.values()):
+        pool = getattr(adapter, "poolmanager", None)
+        if pool is None:
+            continue
+        _pin_resolver(getattr(pool, "_resolver", None))
+
+
 def _build_dav_client(url: str, username: str, password: str):
     """Construct a CalDAV client with automatic redirects disabled.
 
@@ -274,6 +341,10 @@ def _build_dav_client(url: str, username: str, password: str):
     test-connection path in ``routes/calendar_routes.py``, which already sets
     ``follow_redirects=False``.
 
+    The same session would otherwise resolve the host again when it connects,
+    so a later DNS answer could carry the password to a different address.
+    The resolver wrapper keeps that connect on the checked snapshot.
+
     DAVClient exposes no per-request redirect flag, so we set it on the session
     after construction (the session is created in ``__init__``).
     """
@@ -285,6 +356,7 @@ def _build_dav_client(url: str, username: str, password: str):
     # test_build_dav_client_disables_redirects asserts it against installed
     # caldav in CI.
     client.session.max_redirects = 0
+    _pin_caldav_session(client.session)
     return client
 
 

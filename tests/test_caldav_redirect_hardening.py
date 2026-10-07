@@ -9,6 +9,7 @@ write-back surface), not just the settings/test-connection endpoint.
 """
 
 import http.server
+import socket
 import socketserver
 import threading
 
@@ -84,6 +85,47 @@ def test_dav_client_does_not_follow_redirect_to_internal_host():
         public.shutdown()
 
 
+def _gai(ip, port):
+    return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port or 0))]
+
+
+def _lookup(ip, host, port):
+    return caldav_sync._caldav_pinned_getaddrinfo(
+        lambda *a, **k: _gai(ip, port),
+        host,
+        port,
+        (socket.AF_UNSPEC, socket.SOCK_STREAM),
+        {},
+    )
+
+
+def test_pinned_resolver_rejects_a_link_local_hostname():
+    with pytest.raises(OSError, match="not allowed"):
+        _lookup("169.254.169.254", "calendar.example.com", 443)
+
+
+def test_pinned_resolver_keeps_a_public_snapshot():
+    results = _lookup("93.184.216.34", "calendar.example.com", 443)
+    assert results[0][4][0] == "93.184.216.34"
+
+
+def test_pinned_resolver_leaves_ip_literals_unchanged():
+    """The redirect test connects to 127.0.0.1. A literal cannot be rebound."""
+    results = _lookup("127.0.0.1", "127.0.0.1", 80)
+    assert results[0][4][0] == "127.0.0.1"
+
+
+def test_build_dav_client_pins_the_session_resolver(monkeypatch):
+    pytest.importorskip("caldav")
+    client = caldav_sync._build_dav_client("https://calendar.example.com/dav", "u", "p")
+    adapter = client.session.get_adapter("https://calendar.example.com/")
+    resolver = adapter.poolmanager._resolver
+    assert getattr(resolver, "_caldav_pinned", False) is True
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: _gai("169.254.169.254", args[1] if len(args) > 1 else 443))
+    with pytest.raises(OSError, match="not allowed"):
+        resolver.getaddrinfo("calendar.example.com", 443, socket.AF_UNSPEC, socket.SOCK_STREAM)
+
+
 def test_sync_and_writeback_construct_clients_through_the_helper():
     """Guard against a raw DAVClient (redirects enabled) creeping back in.
     Every DAVClient on the sync/write-back paths must go through
@@ -98,6 +140,7 @@ def test_sync_and_writeback_construct_clients_through_the_helper():
     # In caldav_sync the only raw construction lives inside the helper itself.
     assert sync_text.count("caldav.DAVClient(") == 1
     assert "max_redirects = 0" in sync_text
+    assert "_pin_caldav_session(" in sync_text
     assert "_build_dav_client(" in sync_text
 
     # Write-back must not construct its own raw client; it reuses the helper.
