@@ -17,6 +17,7 @@ from src.auth_helpers import (
     owner_filter,
     is_delegated_credential,
     require_chat_api_token_scope,
+    require_user,
 )
 from src.session_image_cleanup import _generated_image_path_for_cleanup, session_image_refs
 from src.session_actions import is_session_recently_active
@@ -128,6 +129,24 @@ def _verify_session_owner(request: Request, session_id: str, session_manager=Non
         if ghost is not None and (not user or getattr(ghost, "owner", None) == user):
             return
     raise HTTPException(404, f"Session {session_id} not found")
+
+
+def _session_user(request: Request):
+    """Owner for session routes that are not already behind _verify_session_owner.
+
+    Chat-scoped tokens still resolve through effective_user. A missing user
+    is single-user mode only when auth is disabled; otherwise require_user
+    applies loopback bypass and first-run, or returns 401. list_sessions
+    and create_session used a missing user as "every session / every
+    endpoint", which exposes other accounts' chats and API keys.
+    """
+    user = effective_user(request)
+    if user:
+        return user
+    if _auth_disabled():
+        return None
+    return require_user(request) or None
+
 
 logger = logging.getLogger(__name__)
 
@@ -249,7 +268,7 @@ def setup_session_routes(
     
     @router.get("/sessions")
     def list_sessions(request: Request):
-        user = effective_user(request)
+        user = _session_user(request)
         active_incognito_id = str(request.query_params.get("active_incognito_id") or "").strip()
         # Lazy purge: incognito sessions are ephemeral by design — wipe leftovers
         # from the DB and session_manager so they vanish on the next page refresh.
@@ -269,7 +288,10 @@ def setup_session_routes(
                 _ghosts = _purge_db.query(DbSession).filter(
                     DbSession.name.in_(("Nobody", "Incognito")),
                     DbSession.created_at < _cutoff,
-                ).all()
+                )
+                if user:
+                    _ghosts = _ghosts.filter(DbSession.owner == user)
+                _ghosts = _ghosts.all()
                 for _g in _ghosts:
                     if active_incognito_id and _g.id == active_incognito_id:
                         continue
@@ -368,7 +390,7 @@ def setup_session_routes(
         endpoint_id: str = Form(""),
     ):
         skip_val = str(skip_validation).lower() == "true"
-        user = effective_user(request)
+        user = _session_user(request)
         _reject_delegated_session_options(
             request,
             skip_validation=skip_val,
@@ -1091,7 +1113,7 @@ def setup_session_routes(
         users can clean junk without spending tokens.
         """
         from src.llm_core import llm_call
-        user = effective_user(request)
+        user = _session_user(request)
         single_user_mode = not user and _auth_disabled()
         user_sessions = session_manager.get_sessions_for_user(user)
 

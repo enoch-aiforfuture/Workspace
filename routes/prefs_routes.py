@@ -3,7 +3,7 @@ import json
 from typing import Optional
 from fastapi import APIRouter, Request
 from core.atomic_io import atomic_write_json
-from src.auth_helpers import get_current_user
+from src.auth_helpers import require_user
 from src.constants import USER_PREFS_FILE
 
 PREFS_FILE = USER_PREFS_FILE
@@ -103,20 +103,27 @@ def _save_for_user(user: Optional[str], prefs: dict):
 def setup_prefs_routes():
     router = APIRouter(prefix="/api/prefs", tags=["preferences"])
 
+    def _caller(request: Request) -> Optional[str]:
+        # _load_for_user(None) reads the first named user's prefs, and
+        # _save_for_user(None) writes them back. That is the auth-off
+        # single-user path. A missing identity while auth is configured
+        # must 401 instead of borrowing that record.
+        return require_user(request) or None
+
     @router.get("")
     async def get_all_prefs(request: Request):
-        user = get_current_user(request)
+        user = _caller(request)
         return _load_for_user(user)
 
     @router.get("/{key}")
     async def get_pref(request: Request, key: str):
-        user = get_current_user(request)
+        user = _caller(request)
         prefs = _load_for_user(user)
         return {"key": key, "value": prefs.get(key)}
 
     @router.put("/{key}")
     async def set_pref(request: Request, key: str, body: dict):
-        user = get_current_user(request)
+        user = _caller(request)
         prefs = _load_for_user(user)
         prefs[key] = body.get("value")
         _save_for_user(user, prefs)

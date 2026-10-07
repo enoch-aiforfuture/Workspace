@@ -66,9 +66,10 @@ def test_list_sessions_excludes_other_users_sessions(monkeypatch):
     sm = MagicMock()
     sm.get_sessions_for_user.return_value = {alice_id: alice_session}
     router = sr.setup_session_routes(sm, {})
-    endpoint = next(r.endpoint for r in router.routes
-                    if getattr(r, "path", "") == "/api/sessions"
-                    and "GET" in getattr(r, "methods", set()))
+    endpoint = [
+        r.endpoint for r in router.routes
+        if getattr(r, "path", "") == "/api/sessions" and "GET" in getattr(r, "methods", set())
+    ][-1]
 
     result = endpoint(request=MagicMock())
     returned_ids = {s["id"] for s in result}
@@ -119,9 +120,10 @@ def test_auto_sort_skip_llm_cleans_owner_stamped_sessions_when_auth_disabled(mon
     sm = MagicMock()
     sm.get_sessions_for_user.return_value = {sid: session}
     router = sr.setup_session_routes(sm, {})
-    endpoint = next(r.endpoint for r in router.routes
-                    if getattr(r, "path", "") == "/api/sessions/auto-sort"
-                    and "POST" in getattr(r, "methods", set()))
+    endpoint = [
+        r.endpoint for r in router.routes
+        if getattr(r, "path", "") == "/api/sessions/auto-sort" and "POST" in getattr(r, "methods", set())
+    ][-1]
 
     result = endpoint(request=MagicMock(), skip_llm=True)
 
