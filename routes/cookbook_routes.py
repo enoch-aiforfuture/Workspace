@@ -3869,7 +3869,7 @@ def setup_cookbook_routes() -> APIRouter:
     @router.get("/api/cookbook/hf-gguf-files")
     async def hf_gguf_files(repo_id: str, owner: str = Depends(require_user)):
         """List GGUF files in a HuggingFace repo for the direct-download picker."""
-        import httpx
+        from src.pinned_fetch import PinnedFetchError, arequest_pinned
 
         repo_id = _validate_repo_id(repo_id)
         url = f"https://huggingface.co/api/models/{repo_id}"
@@ -3878,13 +3878,22 @@ def setup_cookbook_routes() -> APIRouter:
             token = _load_stored_hf_token()
             if token:
                 headers["Authorization"] = f"Bearer {token}"
-            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-                resp = await client.get(url, headers=headers)
-                if resp.status_code != 200:
-                    return {"ok": False, "files": [], "error": f"HF API HTTP {resp.status_code}"}
-                data = resp.json()
+            # The stored HF token rides on this request. Pin the connect and
+            # do not follow redirects, which would send the token onward.
+            resp = await arequest_pinned(
+                "GET",
+                url,
+                headers=headers,
+                block_private=True,
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                return {"ok": False, "files": [], "error": f"HF API HTTP {resp.status_code}"}
+            data = resp.json()
+        except PinnedFetchError as e:
+            return {"ok": False, "files": [], "error": f"HF API request rejected: {e}"}
         except Exception:
-            logger.exception("HF GGUF file scan failed for %s", repo)
+            logger.exception("HF GGUF file scan failed for %s", repo_id)
             return {"ok": False, "files": [], "error": "HF API request failed"}
         files = [
             str(s.get("rfilename") or "")

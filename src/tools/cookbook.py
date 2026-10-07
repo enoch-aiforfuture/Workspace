@@ -478,8 +478,8 @@ async def _cookbook_hf_model_info(repo_id: str) -> Dict[str, Any]:
     not installed in Workspace. Failures return a structured warning rather than
     blocking launch; cached/private/offline models can still be served.
     """
-    import httpx
     from routes.cookbook_helpers import load_stored_hf_token
+    from src.pinned_fetch import PinnedFetchError, arequest_pinned
 
     repo_id = (repo_id or "").strip().strip("/")
     if not repo_id:
@@ -490,15 +490,30 @@ async def _cookbook_hf_model_info(repo_id: str) -> Dict[str, Any]:
         headers["Authorization"] = f"Bearer {token}"
     url = f"https://huggingface.co/api/models/{repo_id}"
     try:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-            resp = await client.get(url, headers=headers)
-        if resp.status_code >= 400:
+        # The stored HF token rides on this request. Pin the connect to the
+        # address the safety check allowed and do not follow redirects: a
+        # Location target would be a different host, and a fresh DNS lookup
+        # can point huggingface.co at a link-local address.
+        resp = await arequest_pinned(
+            "GET",
+            url,
+            headers=headers,
+            block_private=True,
+            timeout=20,
+        )
+        if resp.status_code != 200:
             return {
                 "repo_id": repo_id,
                 "url": f"https://huggingface.co/{repo_id}",
                 "error": f"HF metadata lookup returned HTTP {resp.status_code}",
             }
         data = resp.json() if resp.content else {}
+    except PinnedFetchError as e:
+        return {
+            "repo_id": repo_id,
+            "url": f"https://huggingface.co/{repo_id}",
+            "error": f"HF metadata lookup failed: {e}",
+        }
     except Exception as e:
         return {
             "repo_id": repo_id,
