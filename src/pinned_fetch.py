@@ -393,6 +393,7 @@ def request_pinned(
     content: Optional[bytes] = None,
     data: Optional[dict] = None,
     params: Optional[dict] = None,
+    files: Optional[object] = None,
     auth=None,
     verify: object = _VERIFY_UNSET,
 ) -> httpx.Response:
@@ -400,9 +401,9 @@ def request_pinned(
 
     Embedding calls attach a bearer token and CardDAV calls attach basic
     auth. Following a redirect or re-resolving DNS would send those
-    credentials to a different host. ``data`` and ``params`` are omitted
-    unless the caller set them. ``verify`` is omitted unless set, so the
-    default TLS context stays the one this transport already used.
+    credentials to a different host. ``data``, ``params``, and ``files``
+    are omitted unless the caller set them. ``verify`` is omitted unless
+    set, so the default TLS context stays the one this transport already used.
     """
     ips = resolve_pinned_ips(url, block_private=block_private)
     transport = (
@@ -420,6 +421,8 @@ def request_pinned(
             request_kwargs["data"] = data
         if params is not None:
             request_kwargs["params"] = params
+        if files is not None:
+            request_kwargs["files"] = files
         if auth is not None:
             request_kwargs["auth"] = auth
         return client.request(method, url, **request_kwargs)
@@ -444,6 +447,7 @@ def _sync_request(method: str, url: str, *, block_private: bool = False, **kwarg
     content = kwargs.pop("content", None)
     data = kwargs.pop("data", None)
     params = kwargs.pop("params", None)
+    files = kwargs.pop("files", None)
     auth = kwargs.pop("auth", None)
     verify = kwargs.pop("verify", _VERIFY_UNSET)
     kwargs.pop("follow_redirects", None)
@@ -462,6 +466,8 @@ def _sync_request(method: str, url: str, *, block_private: bool = False, **kwarg
         request_kwargs["data"] = data
     if params is not None:
         request_kwargs["params"] = params
+    if files is not None:
+        request_kwargs["files"] = files
     if auth is not None:
         request_kwargs["auth"] = auth
     if verify is not _VERIFY_UNSET:

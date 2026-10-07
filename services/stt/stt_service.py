@@ -3,12 +3,17 @@
 
 import io
 import logging
-import httpx
 import tempfile
 from pathlib import Path
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
+
+
+def _sync_post(url, **kwargs):
+    """Pinned POST. Tests replace this; the API key rides on the request."""
+    from src.pinned_fetch import sync_post
+    return sync_post(url, **kwargs)
 
 
 class STTService:
@@ -141,7 +146,16 @@ class STTService:
             data["language"] = language
 
         try:
-            r = httpx.post(url, headers=headers, files=files, data=data, timeout=60)
+            # Local speech servers stay reachable. The pin still refuses a
+            # later DNS answer that lands on a link-local address.
+            r = _sync_post(
+                url,
+                headers=headers,
+                files=files,
+                data=data,
+                timeout=60,
+                block_private=False,
+            )
             r.raise_for_status()
             result = r.json()
             text = result.get("text", "")

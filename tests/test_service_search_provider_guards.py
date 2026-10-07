@@ -48,7 +48,7 @@ def test_service_searxng_json_sends_safesearch(monkeypatch):
 
     monkeypatch.setattr(providers, "_get_search_instance", lambda: "http://searx.test")
     monkeypatch.setattr(providers, "_get_search_settings", lambda: {"search_safesearch": "moderate"})
-    monkeypatch.setattr(providers.httpx, "get", fake_get)
+    monkeypatch.setattr(providers, "_sync_get", fake_get)
 
     results = providers.searxng_search_api("workspace", count=1)
 
@@ -92,7 +92,7 @@ def test_service_ddg_html_fallback_sends_safesearch(monkeypatch):
 
     monkeypatch.setattr(providers, "_get_search_settings", lambda: {"search_safesearch": "off"})
     monkeypatch.setitem(sys.modules, "ddgs", None)
-    monkeypatch.setattr(providers.httpx, "get", fake_get)
+    monkeypatch.setattr(providers, "_sync_get", fake_get)
 
     results = providers.duckduckgo_search("workspace", count=1)
 
