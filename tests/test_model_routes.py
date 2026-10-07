@@ -1756,7 +1756,7 @@ def test_api_models_scopes_api_token_to_token_owner(monkeypatch):
             state=SimpleNamespace(
                 auth_manager=SimpleNamespace(
                     is_configured=True,
-                    is_admin=lambda user: admin_checks.append(user) or False,
+                    is_admin=lambda user: admin_checks.append(user) or True,
                 ),
             ),
         ),
@@ -1765,7 +1765,7 @@ def test_api_models_scopes_api_token_to_token_owner(monkeypatch):
     result = _route_endpoint(router, "/api/models")(request)
 
     assert [item["endpoint_name"] for item in result["items"]] == ["alice", "shared"]
-    assert admin_checks == ["alice"]
+    assert admin_checks == []
 
 
 def test_api_models_returns_only_pinned_proxy_models_without_refresh_probe(monkeypatch):

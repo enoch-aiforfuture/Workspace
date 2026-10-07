@@ -29,7 +29,12 @@ from src.endpoint_resolver import (
     build_models_url,
     build_headers,
 )
-from src.auth_helpers import _auth_disabled, effective_user, owner_filter
+from src.auth_helpers import (
+    _auth_disabled,
+    effective_user,
+    is_delegated_credential,
+    owner_filter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1645,7 +1650,14 @@ def setup_model_routes(model_discovery):
         _is_admin = False
         try:
             auth_mgr = getattr(request.app.state, "auth_manager", None)
-            if owner and auth_mgr is not None and getattr(auth_mgr, "is_admin", None):
+            # A bearer token resolves to its owner for data scope, but it must
+            # not inherit that owner's admin view of every private endpoint.
+            if (
+                owner
+                and auth_mgr is not None
+                and getattr(auth_mgr, "is_admin", None)
+                and not is_delegated_credential(request)
+            ):
                 _is_admin = bool(auth_mgr.is_admin(owner))
         except Exception:
             _is_admin = False
@@ -2419,21 +2431,35 @@ def setup_model_routes(model_discovery):
         # no per-user default yet, we resolve via the owner-scoped endpoint
         # lookup below (last-resort: first enabled endpoint THIS user owns).
         # Unauthenticated single-user mode keeps the old behavior.
-        from src.auth_helpers import get_current_user as _gcu
         try:
-            _user = _gcu(request) or ""
+            _user = effective_user(request) or ""
         except Exception:
             _user = ""
+        # A missing identity is single-user mode only when auth is off or not
+        # configured. Otherwise this lookup used the global default and then
+        # the first enabled endpoint in the table, which can be another user.
+        if not _user and not _auth_disabled():
+            _app = getattr(request, "app", None)
+            _gate = getattr(getattr(_app, "state", None), "auth_manager", None)
+            if _gate is not None and getattr(_gate, "is_configured", False):
+                raise HTTPException(401, "Not authenticated")
         # Admins resolve via the global defaults (they own them, and the
         # scoped resolution was making the picker disappear for them).
         # Regular users get per-user prefs with NO global fallback for the
         # model/endpoint values — that's what was leaking the previous
         # admin's pick into every new account's composer.
+        # Bearer tokens stay on the owner-scoped path even when that owner
+        # is an admin.
         settings = _load_settings()
         _is_admin = False
         try:
             auth_mgr = getattr(request.app.state, "auth_manager", None)
-            if _user and auth_mgr is not None and getattr(auth_mgr, "is_admin", None):
+            if (
+                _user
+                and auth_mgr is not None
+                and getattr(auth_mgr, "is_admin", None)
+                and not is_delegated_credential(request)
+            ):
                 _is_admin = bool(auth_mgr.is_admin(_user))
         except Exception:
             _is_admin = False

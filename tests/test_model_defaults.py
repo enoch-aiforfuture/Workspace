@@ -3,6 +3,8 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from fastapi import HTTPException
+
 from tests.helpers.import_state import preserve_import_state
 from tests.helpers.db_stubs import make_core_db_stub
 
@@ -131,6 +133,23 @@ def _run_get_default_chat_test(monkeypatch, share_defaults_enabled, second_endpo
     return result
 
 ### Test Functions
+
+def test_get_default_chat_rejects_anonymous_when_auth_is_configured(monkeypatch):
+    def fail_session():
+        raise AssertionError("anonymous default-chat must not query endpoints")
+
+    monkeypatch.setattr(model_routes, "SessionLocal", fail_session)
+    endpoint = _get_default_chat_route(model_routes.setup_model_routes(model_discovery=None))
+    request = _make_request(
+        user=None,
+        auth_manager=SimpleNamespace(is_configured=True, is_admin=lambda user: True),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        endpoint(request)
+
+    assert exc.value.status_code == 401
+
 
 def test_get_default_chat_user_no_prefs_share_disabled_resolves_nothing(monkeypatch):
     """
