@@ -208,6 +208,7 @@ def test_route_tool_mode_matches_credential_distinct_endpoint(monkeypatch):
         def close(self):
             return None
 
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setattr(database, "SessionLocal", lambda: Db())
     monkeypatch.setattr(
         endpoint_resolver,

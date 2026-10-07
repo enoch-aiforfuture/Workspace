@@ -72,6 +72,9 @@ def _endpoint(ep_id, model, *, hidden=None):
 def _install_resolver_fakes(monkeypatch, settings, endpoints):
     import src.settings as settings_mod
 
+    # These cases exercise the auth-off single-user chain. Auth-on with no
+    # owner must not load endpoint credentials.
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     monkeypatch.setattr(settings_mod, "load_settings", lambda: settings)
     monkeypatch.setattr(
         settings_mod,

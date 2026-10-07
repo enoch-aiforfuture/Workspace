@@ -19,6 +19,19 @@ def auth_disabled() -> bool:
     return os.getenv("AUTH_ENABLED", "true").strip().lower() == "false"
 
 
+def scoped_read_allowed(owner: str | None) -> bool:
+    """Whether a caller may load rows that can carry another user's secrets.
+
+    A named owner is allowed; the query must still be filtered to that owner.
+    A missing owner is allowed only when auth is explicitly off, which is the
+    single-user library. AUTH_ENABLED=true (the default) must not treat a
+    missing owner as "every tenant".
+    """
+    if str(owner or "").strip():
+        return True
+    return auth_disabled()
+
+
 def normalize_owner(owner: str | None) -> Optional[str]:
     """Normalize an owner-like value without inventing a fallback identity."""
     value = str(owner or "").strip()

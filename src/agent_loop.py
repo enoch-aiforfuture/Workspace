@@ -996,11 +996,15 @@ def _agent_route_tool_mode(
 ) -> tuple[bool, bool, bool]:
     """Resolve tool transport behavior for the currently active model route."""
 
+    from src.owner_identity import scoped_read_allowed
+
     model_lc = (model or "").lower()
     endpoint_supports: Optional[bool] = None
     try:
         from core.database import SessionLocal as _SL, ModelEndpoint as _ME
 
+        if not scoped_read_allowed(owner):
+            raise LookupError("missing owner")
         db = _SL()
         try:
             endpoints = []
@@ -1040,6 +1044,8 @@ def _agent_route_tool_mode(
                 endpoint_supports = endpoint.supports_tools
         finally:
             db.close()
+    except LookupError:
+        pass
     except Exception as exc:
         logger.debug("endpoint supports_tools lookup failed: %s", exc)
 

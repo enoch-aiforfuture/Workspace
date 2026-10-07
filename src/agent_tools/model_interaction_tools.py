@@ -131,7 +131,11 @@ async def list_models(content: str, session_id: Optional[str] = None, owner: Opt
     from src.auth_helpers import owner_filter
     from src.endpoint_resolver import resolve_endpoint_runtime, build_headers, build_models_url
 
+    from src.owner_identity import scoped_read_allowed
+
     keyword = content.strip().lower() if content.strip() else None
+    if not scoped_read_allowed(owner):
+        return {"results": "No enabled model endpoints configured."}
 
     db = SessionLocal()
     try:

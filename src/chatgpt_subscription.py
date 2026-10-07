@@ -252,6 +252,13 @@ def access_token_is_expiring(access_token: str, skew_seconds: int = CHATGPT_ACCE
 
 
 def resolve_runtime_credentials(auth_id: str, owner: Optional[str] = None, *, force_refresh: bool = False) -> Dict[str, Any]:
+    from src.owner_identity import scoped_read_allowed
+
+    if not scoped_read_allowed(owner):
+        raise ChatGPTSubscriptionAuthNotFound(
+            "ChatGPT Subscription credentials were not found for this user."
+        )
+
     ProviderAuthSession, SessionLocal, utcnow_naive = _database_handles()
     db = SessionLocal()
     try:
