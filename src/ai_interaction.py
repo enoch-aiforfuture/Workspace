@@ -1233,7 +1233,7 @@ async def do_edit_image(
     import mimetypes
     import os
     from pathlib import Path
-    from src.pinned_fetch import PinnedFetchError, aget_pinned
+    from src.pinned_fetch import PinnedFetchError, aget_pinned, arequest_pinned
 
     prompt = (prompt or "").strip()
     if not prompt:
@@ -1315,7 +1315,10 @@ async def do_edit_image(
         (img_dir / filename).write_bytes(image_bytes)
         return f"/api/generated-image/{filename}", _save_edited_image_to_gallery(filename)
 
-    async def _try_local_img2img_fallback(client: httpx.AsyncClient) -> Optional[Dict[str, Any]]:
+    block_private = os.getenv("IMAGE_BLOCK_PRIVATE_IPS", "false").lower() == "true"
+    edit_timeout = httpx.Timeout(connect=30.0, read=600.0, write=60.0, pool=30.0)
+
+    async def _try_local_img2img_fallback() -> Optional[Dict[str, Any]]:
         """Try Workspace' local diffusion img2img endpoint.
 
         Some self-hosted SD/SDXL endpoints expose text-to-image plus
@@ -1341,7 +1344,14 @@ async def do_edit_image(
                     "step": 0,
                     "total": 0,
                 })
-            fallback_resp = await client.post(harmonize_url, json=fallback_payload, headers=headers)
+            fallback_resp = await arequest_pinned(
+                "POST",
+                harmonize_url,
+                json=fallback_payload,
+                headers=headers,
+                block_private=block_private,
+                timeout=edit_timeout,
+            )
             if fallback_resp.status_code == 404:
                 return None
             if fallback_resp.status_code != 200:
@@ -1377,107 +1387,120 @@ async def do_edit_image(
             return {"error": f"Image edit fallback error: {fallback_error}"}
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=600.0, write=60.0, pool=30.0)) as client:
-            progress_task = None
-            if progress_callback:
-                progress_url = base_url + f"/images/progress/{request_id}"
+        progress_task = None
+        if progress_callback:
+            progress_url = base_url + f"/images/progress/{request_id}"
 
-                async def _poll_progress():
-                    last_sig = None
-                    while True:
-                        try:
-                            pr = await client.get(progress_url, headers=headers, timeout=5.0)
-                            if pr.status_code == 404:
-                                return
-                            if pr.status_code == 200:
-                                data = pr.json()
-                                sig = (data.get("status"), data.get("step"), data.get("total"), data.get("percent"))
-                                if sig != last_sig:
-                                    last_sig = sig
-                                    await progress_callback(data)
-                                if data.get("status") in {"done", "error"}:
-                                    return
-                        except Exception:
-                            return
-                        await asyncio.sleep(1)
-
-                progress_task = asyncio.create_task(_poll_progress())
-            try:
-                with path.open("rb") as f:
-                    files = {"image": (path.name, f, mime)}
-                    resp = await client.post(edits_url, data=payload, files=files, headers=headers)
-            finally:
-                if progress_task:
-                    progress_task.cancel()
+            async def _poll_progress():
+                last_sig = None
+                while True:
                     try:
-                        await progress_task
-                    except asyncio.CancelledError:
-                        pass
+                        pr = await arequest_pinned(
+                            "GET",
+                            progress_url,
+                            headers=headers,
+                            block_private=block_private,
+                            timeout=5.0,
+                        )
+                        if pr.status_code == 404:
+                            return
+                        if pr.status_code == 200:
+                            data = pr.json()
+                            sig = (data.get("status"), data.get("step"), data.get("total"), data.get("percent"))
+                            if sig != last_sig:
+                                last_sig = sig
+                                await progress_callback(data)
+                            if data.get("status") in {"done", "error"}:
+                                return
+                    except Exception:
+                        return
+                    await asyncio.sleep(1)
 
-            if resp.status_code != 200:
-                error_text = resp.text[:500]
+            progress_task = asyncio.create_task(_poll_progress())
+        try:
+            with path.open("rb") as f:
+                files = {"image": (path.name, f, mime)}
+                resp = await arequest_pinned(
+                    "POST",
+                    edits_url,
+                    data=payload,
+                    files=files,
+                    headers=headers,
+                    block_private=block_private,
+                    timeout=edit_timeout,
+                )
+        finally:
+            if progress_task:
+                progress_task.cancel()
                 try:
-                    err_json = resp.json()
-                    err = err_json.get("error")
-                    error_text = (
-                        err.get("message", error_text)
-                        if isinstance(err, dict)
-                        else str(err or err_json.get("detail") or error_text)
-                    )
-                except Exception:
+                    await progress_task
+                except asyncio.CancelledError:
                     pass
-                if resp.status_code in (400, 404, 405, 422):
-                    fallback = await _try_local_img2img_fallback(client)
-                    if fallback:
-                        return fallback
-                    if resp.status_code == 404:
-                        return {
-                            "error": (
-                                f"Image model '{model_id}' is reachable, but this endpoint does not expose image editing. "
-                                "Use it without an attached image for text-to-image generation, or serve an edit/img2img "
-                                "model for attached-image prompts."
-                            )
-                        }
-                return {
-                    "error": f"Image edit failed ({resp.status_code}): {error_text}",
-                    "untrusted_content": True,
-                }
 
-            data = resp.json()
-            images = data.get("data", [])
-            if not images:
-                return {"error": "No image returned from edit API"}
-
-            img = images[0]
-            image_url = None
-            image_id = None
-
-            if img.get("b64_json"):
-                image_url, image_id = _save_image_bytes(base64.b64decode(img.get("b64_json")))
-            elif img.get("url"):
-                result_url = img["url"]
-                block_private = os.getenv("IMAGE_BLOCK_PRIVATE_IPS", "false").lower() == "true"
-                try:
-                    dl_resp = await aget_pinned(
-                        result_url, block_private=block_private, timeout=60
-                    )
-                except PinnedFetchError as exc:
-                    return {"error": f"Image edit API returned unsafe image URL: {exc}"}
-                if dl_resp.status_code != 200:
-                    return {"error": f"Could not download edited image ({dl_resp.status_code})"}
-                image_url, image_id = _save_image_bytes(dl_resp.content)
-            else:
-                return {"error": "Image edit API returned unexpected format (no b64_json or url)"}
-
+        if resp.status_code != 200:
+            error_text = resp.text[:500]
+            try:
+                err_json = resp.json()
+                err = err_json.get("error")
+                error_text = (
+                    err.get("message", error_text)
+                    if isinstance(err, dict)
+                    else str(err or err_json.get("detail") or error_text)
+                )
+            except Exception:
+                pass
+            if resp.status_code in (400, 404, 405, 422):
+                fallback = await _try_local_img2img_fallback()
+                if fallback:
+                    return fallback
+                if resp.status_code == 404:
+                    return {
+                        "error": (
+                            f"Image model '{model_id}' is reachable, but this endpoint does not expose image editing. "
+                            "Use it without an attached image for text-to-image generation, or serve an edit/img2img "
+                            "model for attached-image prompts."
+                        )
+                    }
             return {
-                "results": f"Edited image for: {prompt[:100]}",
-                "image_url": image_url,
-                "image_id": image_id,
-                "image_prompt": prompt,
-                "image_model": model_id,
-                "image_size": size,
-                "image_quality": payload.get("quality", "medium"),
+                "error": f"Image edit failed ({resp.status_code}): {error_text}",
+                "untrusted_content": True,
             }
+
+        data = resp.json()
+        images = data.get("data", [])
+        if not images:
+            return {"error": "No image returned from edit API"}
+
+        img = images[0]
+        image_url = None
+        image_id = None
+
+        if img.get("b64_json"):
+            image_url, image_id = _save_image_bytes(base64.b64decode(img.get("b64_json")))
+        elif img.get("url"):
+            result_url = img["url"]
+            block_private = os.getenv("IMAGE_BLOCK_PRIVATE_IPS", "false").lower() == "true"
+            try:
+                dl_resp = await aget_pinned(
+                    result_url, block_private=block_private, timeout=60
+                )
+            except PinnedFetchError as exc:
+                return {"error": f"Image edit API returned unsafe image URL: {exc}"}
+            if dl_resp.status_code != 200:
+                return {"error": f"Could not download edited image ({dl_resp.status_code})"}
+            image_url, image_id = _save_image_bytes(dl_resp.content)
+        else:
+            return {"error": "Image edit API returned unexpected format (no b64_json or url)"}
+
+        return {
+            "results": f"Edited image for: {prompt[:100]}",
+            "image_url": image_url,
+            "image_id": image_id,
+            "image_prompt": prompt,
+            "image_model": model_id,
+            "image_size": size,
+            "image_quality": payload.get("quality", "medium"),
+        }
     except httpx.TimeoutException:
         return {"error": "Image edit timed out. The model may still be loading or overloaded."}
     except Exception as e:
