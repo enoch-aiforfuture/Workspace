@@ -1109,15 +1109,16 @@ async def _startup_event():
 
         async def _warmup_endpoints():
             try:
-                import httpx
+                from src.pinned_fetch import arequest_pinned
                 urls = (
                     await asyncio.to_thread(model_discovery.warmup_ping_urls)
                     if model_discovery else []
                 )
                 for url in urls:
                     try:
-                        async with httpx.AsyncClient(timeout=5.0) as client:
-                            await client.get(url)
+                        # Discovered hosts are checked, then the socket stays
+                        # on that address. A rebind must not move the ping.
+                        await arequest_pinned("GET", url, timeout=5.0)
                         logger.info(f"Warmup ping OK: {url}")
                     except Exception as e:
                         logger.debug(f"Warmup ping failed for endpoint: {e}")
