@@ -7,6 +7,7 @@ drift — the drift is what left the keyword path sweeping in `.obsidian/`,
 `.git/`, and `node_modules/` after the vector path was fixed.
 """
 import os
+import stat
 from typing import List, Set
 
 # Well-known non-hidden junk directories to skip. Matched case-insensitively so
@@ -51,3 +52,19 @@ def path_stays_inside(path: str, root: str) -> bool:
         return os.path.commonpath([real, base]) == base
     except (ValueError, OSError):
         return False
+
+
+def is_hardlinked_file(path: str) -> bool:
+    """True when ``path`` is a regular file with more than one directory entry.
+
+    A hard link keeps a path inside the personal-docs tree while the bytes
+    are the same inode as a file outside it. ``os.path.realpath`` does not
+    reveal that alias, and opening the link reads the other name's content.
+    The same rule the agent file tools use: any extra link is skipped, including
+    an in-tree alias, because the other name cannot be proven to stay inside.
+    """
+    try:
+        st = os.stat(path, follow_symlinks=False)
+    except OSError:
+        return False
+    return stat.S_ISREG(st.st_mode) and getattr(st, "st_nlink", 1) > 1

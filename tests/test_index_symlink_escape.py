@@ -10,6 +10,8 @@ import os
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
+import pytest
+
 from src.index_walk import path_stays_inside
 from src.personal_docs import PersonalDocsManager, load_personal_index
 import src.rag_vector as rag_vector
@@ -127,6 +129,55 @@ def test_vector_index_skips_file_symlink_to_outside(tmp_path):
     secret = outside / "secret.md"
     secret.write_text(SECRET)
     os.symlink(secret, personal / "alias.md")
+
+    recorded = set()
+    rag = rag_vector.VectorRAG.__new__(rag_vector.VectorRAG)
+
+    def _record(text, metadata):
+        recorded.add(metadata["source"])
+        assert SECRET not in text
+        return True
+
+    rag.add_document = _record
+    result = rag.index_personal_documents(str(personal))
+
+    assert result["success"] is True
+    indexed = {os.path.relpath(p, str(personal)) for p in recorded}
+    assert indexed == {"keep.md"}
+
+
+def _link_or_skip(src, dst):
+    try:
+        os.link(src, dst)
+    except OSError as exc:
+        pytest.skip(f"cannot create hardlink: {exc}")
+
+
+def test_keyword_index_skips_hardlink_to_outside(tmp_path):
+    personal = tmp_path / "personal"
+    personal.mkdir()
+    (personal / "keep.md").write_text("keep-me")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = outside / "secret.md"
+    secret.write_text(SECRET)
+    _link_or_skip(secret, personal / "alias.md")
+
+    records = load_personal_index(str(personal))
+
+    assert {rec["name"] for rec in records} == {"keep.md"}
+    assert SECRET not in _chunks(records)
+
+
+def test_vector_index_skips_hardlink_to_outside(tmp_path):
+    personal = tmp_path / "personal"
+    personal.mkdir()
+    (personal / "keep.md").write_text("keep-me")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = outside / "secret.md"
+    secret.write_text(SECRET)
+    _link_or_skip(secret, personal / "alias.md")
 
     recorded = set()
     rag = rag_vector.VectorRAG.__new__(rag_vector.VectorRAG)

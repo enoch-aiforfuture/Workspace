@@ -14,7 +14,12 @@ import numpy as np
 from typing import List, Dict, Any, Optional, Set
 
 from src.constants import CHROMA_DIR
-from src.index_walk import path_stays_inside, prune_index_dirs, is_indexable_file
+from src.index_walk import (
+    is_hardlinked_file,
+    is_indexable_file,
+    path_stays_inside,
+    prune_index_dirs,
+)
 from pathlib import Path
 
 from src.embedding_lanes import (
@@ -512,7 +517,11 @@ class VectorRAG:
                     if not is_indexable_file(fname):
                         continue
                     fpath = os.path.join(root, fname)
-                    if os.path.islink(fpath) or not path_stays_inside(fpath, directory):
+                    if (
+                        os.path.islink(fpath)
+                        or is_hardlinked_file(fpath)
+                        or not path_stays_inside(fpath, directory)
+                    ):
                         continue
                     ext = Path(fname).suffix.lower()
                     if ext not in file_extensions:
