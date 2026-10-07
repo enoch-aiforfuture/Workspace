@@ -338,25 +338,32 @@ def setup_webhook_routes(
 
             if model == "auto":
                 try:
-                    async with httpx.AsyncClient(timeout=5) as client:
-                        models_url = build_models_url(base_url)
-                        hdrs = build_headers(api_key, base_url)
-                        if models_url:
-                            resp = await client.get(models_url, headers=hdrs)
-                            resp.raise_for_status()
-                            data = resp.json()
-                            items = data if isinstance(data, list) else (data.get("data") or [])
-                            ids = [m.get("id") for m in items if isinstance(m, dict) and m.get("id")]
-                            if not ids and isinstance(data, dict):
-                                ids = [
-                                    m.get("name") or m.get("model")
-                                    for m in (data.get("models") or [])
-                                    if m.get("name") or m.get("model")
-                                ]
-                        else:
-                            import json as _json
-                            ids = _json.loads(ep.cached_models or "[]")
-                        model = ids[0] if ids else "auto"
+                    from src.pinned_fetch import arequest_pinned
+                    models_url = build_models_url(base_url)
+                    hdrs = build_headers(api_key, base_url)
+                    if models_url:
+                        # The API key rides on this GET. Pin the connect to
+                        # the address that passed the safety check.
+                        resp = await arequest_pinned(
+                            "GET",
+                            models_url,
+                            headers=hdrs,
+                            timeout=5,
+                        )
+                        resp.raise_for_status()
+                        data = resp.json()
+                        items = data if isinstance(data, list) else (data.get("data") or [])
+                        ids = [m.get("id") for m in items if isinstance(m, dict) and m.get("id")]
+                        if not ids and isinstance(data, dict):
+                            ids = [
+                                m.get("name") or m.get("model")
+                                for m in (data.get("models") or [])
+                                if m.get("name") or m.get("model")
+                            ]
+                    else:
+                        import json as _json
+                        ids = _json.loads(ep.cached_models or "[]")
+                    model = ids[0] if ids else "auto"
                 except Exception:
                     raise HTTPException(500, "Could not discover models from endpoint")
 

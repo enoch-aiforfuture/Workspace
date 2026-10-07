@@ -395,6 +395,23 @@ def _append_local_ollama_download_command_lines(
     lines.append('if [ -z "$WORKSPACE_OLLAMA_PULL_CMD" ]; then echo "ERROR: Ollama not found on this server. Install Ollama or start an ollama-rocm/ollama-test container."; exit 127; fi')
 
 
+_VLLM_RECIPE_REPO = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}/[A-Za-z0-9][A-Za-z0-9._-]{0,120}$"
+)
+
+
+def _vllm_recipe_repo(repo: str) -> str | None:
+    """Return a single org/name id, or None when it could change the URL.
+
+    The value is interpolated into a GitHub raw path. ``..``, a second
+    slash, or URL punctuation would let the request leave that path.
+    """
+    value = (repo or "").strip().strip("/")
+    if ".." in value or not _VLLM_RECIPE_REPO.fullmatch(value):
+        return None
+    return value
+
+
 def setup_cookbook_routes() -> APIRouter:
     router = APIRouter(tags=["cookbook"])
     _cookbook_state_path = Path(COOKBOOK_STATE_FILE)
@@ -3526,20 +3543,24 @@ def setup_cookbook_routes() -> APIRouter:
         pipeline: HF pipeline_tag filter (text-generation, text-to-image, etc.).
         """
         import re
-        import httpx
 
         # Fetch a larger pool so we have enough to filter from (we drop ~80%)
         pool_size = max(limit * 15, 100)
-        url = (
-            "https://huggingface.co/api/models"
-            f"?sort=trendingScore&direction=-1&limit={pool_size}&filter={pipeline}"
-        )
+        from urllib.parse import urlencode
+        from src.pinned_fetch import PinnedFetchError, aget_pinned
+        url = "https://huggingface.co/api/models?" + urlencode({
+            "sort": "trendingScore",
+            "direction": "-1",
+            "limit": str(pool_size),
+            "filter": pipeline or "",
+        })
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.get(url)
-                if resp.status_code != 200:
-                    return {"models": [], "error": f"HF API HTTP {resp.status_code}"}
-                raw = resp.json()
+            resp = await aget_pinned(url, timeout=15)
+            if resp.status_code != 200:
+                return {"models": [], "error": f"HF API HTTP {resp.status_code}"}
+            raw = resp.json()
+        except PinnedFetchError as e:
+            return {"models": [], "error": str(e)}
         except Exception as e:
             return {"models": [], "error": str(e)}
 
@@ -3948,18 +3969,18 @@ def setup_cookbook_routes() -> APIRouter:
         Tries a 1-hour-cached fetch of ollama.com/library, falls back to a
         curated hard-coded list so the picker always renders something."""
         import time as _time
-        import httpx as _httpx
         TTL = 3600.0
         now = _time.time()
         if refresh or (now - _ollama_library_cache["fetched_at"]) > TTL or not _ollama_library_cache["models"]:
             models: list[dict] = []
             err = None
             try:
-                async with _httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
-                    resp = await client.get(
-                        "https://ollama.com/search?sort=popular",
-                        headers={"User-Agent": "workspace-cookbook/1.0"},
-                    )
+                from src.pinned_fetch import aget_pinned
+                resp = await aget_pinned(
+                    "https://ollama.com/search?sort=popular",
+                    headers={"User-Agent": "workspace-cookbook/1.0"},
+                    timeout=8,
+                )
                 if resp.status_code == 200:
                     html = resp.text
                     # ollama.com renders each model card as a single anchor:
@@ -4034,7 +4055,6 @@ def setup_cookbook_routes() -> APIRouter:
         One GitHub Tree API call, 12h cache. The frontend uses this to badge
         rows in the model list before the user expands them."""
         import time as _time
-        import httpx as _httpx
         TTL = 12 * 3600.0
         now = _time.time()
         if (
@@ -4046,17 +4066,21 @@ def setup_cookbook_routes() -> APIRouter:
                 "https://api.github.com/repos/vllm-project/recipes/"
                 "git/trees/main?recursive=1"
             )
-            def _fetch_sync() -> tuple[int, dict | None, str]:
-                try:
-                    headers = {"Accept": "application/vnd.github+json"}
-                    with _httpx.Client(timeout=10.0, follow_redirects=True) as client:
-                        r = client.get(url, headers=headers)
-                        if r.status_code != 200:
-                            return r.status_code, None, r.text[:200]
-                        return 200, r.json(), ""
-                except Exception as e:
-                    return 0, None, f"fetch error: {e}"
-            status, data, err = await asyncio.to_thread(_fetch_sync)
+            from src.pinned_fetch import PinnedFetchError, aget_pinned
+            try:
+                r = await aget_pinned(
+                    url,
+                    headers={"Accept": "application/vnd.github+json"},
+                    timeout=10.0,
+                )
+                if r.status_code != 200:
+                    status, data, err = r.status_code, None, r.text[:200]
+                else:
+                    status, data, err = 200, r.json(), ""
+            except PinnedFetchError as e:
+                status, data, err = 0, None, f"fetch error: {e}"
+            except Exception as e:
+                status, data, err = 0, None, f"fetch error: {e}"
             if status == 200 and isinstance(data, dict):
                 models: set[str] = set()
                 for entry in data.get("tree") or []:
@@ -4094,13 +4118,12 @@ def setup_cookbook_routes() -> APIRouter:
         exists at vllm-project/recipes. `repo` is the full HF id like
         'MiniMaxAI/MiniMax-M2'. Cached 6h."""
         import time as _time
-        import httpx as _httpx
         import yaml as _yaml
 
         TTL = 6 * 3600.0
         now = _time.time()
-        repo = (repo or "").strip().strip("/")
-        if "/" not in repo:
+        repo = _vllm_recipe_repo(repo)
+        if not repo:
             return {"exists": False, "error": "repo must be <org>/<model>"}
 
         cached = _vllm_recipe_cache.get(repo)
@@ -4112,15 +4135,14 @@ def setup_cookbook_routes() -> APIRouter:
             f"main/models/{repo}.yaml"
         )
 
-        def _fetch_sync() -> tuple[int, str]:
-            try:
-                with _httpx.Client(timeout=8.0, follow_redirects=True) as client:
-                    r = client.get(url)
-                    return r.status_code, r.text
-            except Exception as e:
-                return 0, f"fetch error: {e}"
-
-        status, text = await asyncio.to_thread(_fetch_sync)
+        from src.pinned_fetch import PinnedFetchError, aget_pinned
+        try:
+            r = await aget_pinned(url, timeout=8.0)
+            status, text = r.status_code, r.text
+        except PinnedFetchError as e:
+            status, text = 0, f"fetch error: {e}"
+        except Exception as e:
+            status, text = 0, f"fetch error: {e}"
         if status == 404:
             _vllm_recipe_cache[repo] = (now, {"exists": False})
             return {"exists": False}

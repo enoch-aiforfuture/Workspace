@@ -166,9 +166,15 @@ async def aget_pinned(
     *,
     block_private: bool = False,
     timeout: float = 60.0,
+    headers: Optional[dict] = None,
 ) -> httpx.Response:
-    """GET ``url``, re-checking and re-pinning every redirect hop."""
+    """GET ``url``, re-checking and re-pinning every redirect hop.
+
+    Caller headers are sent only on the first request. A redirect must not
+    carry them to the next host.
+    """
     current = url
+    hop_headers = headers
     for _ in range(_MAX_REDIRECTS + 1):
         ips = resolve_pinned_ips(current, block_private=block_private)
         async with httpx.AsyncClient(
@@ -176,7 +182,11 @@ async def aget_pinned(
             follow_redirects=False,
             timeout=timeout,
         ) as client:
-            response = await client.get(current)
+            get_kwargs = {}
+            if hop_headers:
+                get_kwargs["headers"] = hop_headers
+            response = await client.get(current, **get_kwargs)
+        hop_headers = None
         if response.status_code in _REDIRECT_STATUSES:
             location = response.headers.get("location")
             if not location:
