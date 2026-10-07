@@ -3,6 +3,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Tuple, Dict, Any, Optional
 
+from src.owner_identity import auth_disabled
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,13 +30,16 @@ class CleanupConfig:
 def _apply_owner_filter(query, DbSession, owner: Optional[str]):
     """Apply owner filtering to a session query.
 
-    SECURITY: strict — the previous OR predicate let one user's cleanup
-    archive/delete every null-owner session, including ones that hadn't
-    been migrated. Now: only rows owned by this user.
+    A named owner matches only that owner's rows. ``owner=None`` is the
+    auth-disabled single-user library. When auth is on, a missing owner
+    must not select every tenant: the routes 401 first, and this filter
+    still matches nothing if a caller skips that gate.
     """
-    if owner is None:
+    if owner:
+        return query.filter(DbSession.owner == owner)
+    if auth_disabled():
         return query
-    return query.filter(DbSession.owner == owner)
+    return query.filter(False)
 
 
 async def archive_inactive_sessions(session_manager, owner: Optional[str] = None) -> int:
