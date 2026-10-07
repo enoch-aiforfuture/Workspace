@@ -136,6 +136,21 @@ def _owner_filter(q, user, model_cls=GalleryImage):
     return q.filter(False)
 
 
+def _caller_owns(resource_owner, user) -> bool:
+    """Whether this caller may act on one gallery row.
+
+    List queries use ``_owner_filter``, which keeps the whole library visible
+    when auth is disabled and ``get_current_user`` is None. Point lookups used
+    ``if not user or owner != user``, so that same single-user mode 403/404'd
+    every replace, rename, rotate, patch, delete, and album mutation. A named
+    user must still own the row. A missing user is allowed only when auth is
+    disabled, and stays denied when auth is on.
+    """
+    if user is not None:
+        return resource_owner == user
+    return _auth_disabled()
+
+
 
 def _human_size(nbytes):
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
