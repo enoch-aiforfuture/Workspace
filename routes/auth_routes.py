@@ -827,7 +827,6 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         # subscriber app is wired up correctly, this is what the green
         # checkmark + a phone ping confirms together.
         if preset == "ntfy":
-            import httpx
             from urllib.parse import urlparse
             # Strip any path/query the user accidentally pasted in the
             # base URL (e.g. `http://host:8091/workspace`) — otherwise
@@ -853,12 +852,14 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 elif auth_type == "header":
                     headers[integ.get("auth_header") or "Authorization"] = api_key
             try:
-                async with httpx.AsyncClient(timeout=8.0) as client:
-                    r = await client.post(
-                        full_url,
-                        content="Connectivity test from Workspace. If you see this on your phone, ntfy is wired up correctly.",
-                        headers=headers,
-                    )
+                from src.pinned_fetch import PinnedFetchError, arequest_pinned
+                r = await arequest_pinned(
+                    "POST",
+                    full_url,
+                    content="Connectivity test from Workspace. If you see this on your phone, ntfy is wired up correctly.",
+                    headers=headers,
+                    timeout=8.0,
+                )
                 if r.is_success:
                     # Tell the user EXACTLY where it went and what to
                     # subscribe to on their phone, so they can match
@@ -874,6 +875,8 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                         ),
                     }
                 return {"ok": False, "message": f"ntfy returned HTTP {r.status_code} from {full_url}: {r.text[:200]}"}
+            except PinnedFetchError as e:
+                return {"ok": False, "message": f"ntfy URL rejected: {e}"[:500]}
             except Exception as e:
                 hint = ""
                 if parsed.hostname not in ("127.0.0.1", "localhost"):
@@ -881,7 +884,6 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 return {"ok": False, "message": f"ntfy publish to {full_url} failed: {e}.{hint}"[:500]}
 
         if preset == "discord_webhook":
-            import httpx
             webhook_url = (integ.get("base_url") or "").strip()
             if not webhook_url:
                 return {"ok": False, "message": "No webhook URL set — paste the full Discord webhook URL into the Base URL field."}
@@ -893,11 +895,19 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
                 }]
             }
             try:
-                async with httpx.AsyncClient(timeout=8.0) as client:
-                    r = await client.post(webhook_url, json=payload)
+                from src.pinned_fetch import PinnedFetchError, arequest_pinned
+                r = await arequest_pinned(
+                    "POST",
+                    webhook_url,
+                    json=payload,
+                    block_private=True,
+                    timeout=8.0,
+                )
                 if r.is_success:
                     return {"ok": True, "message": "Test embed sent — check your Discord channel to confirm it arrived."}
                 return {"ok": False, "message": f"Discord returned HTTP {r.status_code}: {r.text[:200]}"}
+            except PinnedFetchError as e:
+                return {"ok": False, "message": f"Discord webhook URL rejected: {e}"[:400]}
             except Exception as e:
                 return {"ok": False, "message": f"Request failed: {e}"[:400]}
 
