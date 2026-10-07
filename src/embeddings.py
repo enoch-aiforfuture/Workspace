@@ -116,11 +116,24 @@ class EmbeddingClient:
             raise
 
     def _post_embeddings(self, batch: List[str]) -> List[List[float]]:
-        resp = self._client.post(
-            self.url,
-            headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {},
-            json={"input": batch, "model": self.model},
-        )
+        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        payload = {"input": batch, "model": self.model}
+        # A replaced client (tests, fakes) keeps its own post(). The real
+        # httpx client re-resolves on every post, so those calls go through
+        # the pinned helper instead of sending the bearer token to a rebinding
+        # address or a redirect target.
+        if type(self._client).__module__.split(".")[0] == "httpx":
+            from src.pinned_fetch import request_pinned
+            resp = request_pinned(
+                "POST",
+                self.url,
+                headers=headers,
+                json=payload,
+                block_private=os.getenv("EMBEDDING_BLOCK_PRIVATE_IPS", "false").lower() == "true",
+                timeout=self._client.timeout,
+            )
+        else:
+            resp = self._client.post(self.url, headers=headers, json=payload)
         resp.raise_for_status()
         data = resp.json()
 

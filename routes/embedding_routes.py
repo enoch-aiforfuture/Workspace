@@ -271,16 +271,23 @@ def setup_embedding_routes():
         if not ok:
             raise HTTPException(400, f"Rejected endpoint URL: {reason}")
 
-        # Quick health check
+        # Quick health check. Re-resolve and pin: the check above and a plain
+        # httpx.post are two DNS lookups, and this request carries the API key.
         try:
-            import httpx
-            resp = httpx.post(
+            from src.pinned_fetch import PinnedFetchError, request_pinned
+            resp = request_pinned(
+                "POST",
                 url,
                 json={"input": ["test"], "model": model or "test"},
                 headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
+                block_private=os.getenv("EMBEDDING_BLOCK_PRIVATE_IPS", "false").lower() == "true",
                 timeout=10,
             )
             resp.raise_for_status()
+        except PinnedFetchError as e:
+            raise HTTPException(400, f"Rejected endpoint URL: {e}")
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(400, f"Endpoint unreachable: {e}")
 
