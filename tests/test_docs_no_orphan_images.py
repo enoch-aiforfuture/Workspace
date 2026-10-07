@@ -107,6 +107,14 @@ def test_pages_site_owns_its_entrypoint_and_media():
     assert "destination: _site" in workflow
     assert "path: _site" in workflow
     assert "cancel-in-progress: false" in workflow
+    # Pages is optional. A missing site is HTTP 404 from GET /pages; the
+    # package and deploy jobs must skip instead of failing configure-pages.
+    assert "https://api.github.com/repos/${GITHUB_REPOSITORY}/pages" in workflow
+    assert 'http_code" = "404"' in workflow
+    assert "enabled=false" in workflow
+    assert "needs.pages-enabled.outputs.enabled == 'true'" in workflow
+    assert "needs.build.result == 'success'" in workflow
+    assert "enablement: true" not in workflow
 
 
 def test_pages_guides_keep_relative_links_inside_site():

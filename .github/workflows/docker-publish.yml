@@ -8,7 +8,9 @@ name: ci / docker publish
 # Multi-arch (linux/amd64 + linux/arm64): each arch builds on its own native
 # runner and pushes by digest, then a merge job stitches the digests into one
 # manifest list and applies the tags (faster + cleaner than QEMU emulation).
-# Registry: ghcr.io/<owner>/<repo>.
+# Registry: ghcr.io/<owner>/<repo>, lowercased. GHCR rejects mixed-case
+# repository names, and github.repository keeps the repo's original casing
+# (for example "Workspace").
 
 on:
   push:
@@ -29,7 +31,6 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build:
@@ -49,6 +50,22 @@ jobs:
             arch: arm64
             runner: ubuntu-24.04-arm
     steps:
+      - name: Lowercase GHCR image name
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          # ${VAR,,} lowercases the whole owner/repo. buildx rejects
+          # ghcr.io/enoch-aiforfuture/Workspace with "repository name must be lowercase".
+          name="${GITHUB_REPOSITORY,,}"
+          case "$name" in
+            *[[:upper:]]*)
+              echo "GHCR image name still has uppercase: ${name}" >&2
+              exit 1
+              ;;
+          esac
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          echo "Publishing ${REGISTRY}/${name}"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
@@ -66,7 +83,7 @@ jobs:
         with:
           context: .
           platforms: ${{ matrix.platform }}
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ steps.image.outputs.name }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
       - name: Export digest
@@ -90,6 +107,22 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: Lowercase GHCR image name
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Same lowercase rule as the build job. metadata-action lowercases
+          # tags, but imagetools create/inspect use this name verbatim.
+          name="${GITHUB_REPOSITORY,,}"
+          case "$name" in
+            *[[:upper:]]*)
+              echo "GHCR image name still has uppercase: ${name}" >&2
+              exit 1
+              ;;
+          esac
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          echo "Tagging ${REGISTRY}/${name}"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
@@ -118,7 +151,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=raw,value=${{ steps.ver.outputs.version }},enable=${{ github.ref == 'refs/heads/main' }}
@@ -135,7 +168,7 @@ jobs:
           docker buildx imagetools create $tags $digests
         env:
           REGISTRY: ${{ env.REGISTRY }}
-          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
       - name: Inspect
         run: |
           # main: verify both the mutable :latest and the immutable :X.Y.Z-<sha> prod pin
@@ -150,4 +183,4 @@ jobs:
           done
         env:
           REGISTRY: ${{ env.REGISTRY }}
-          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
