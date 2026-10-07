@@ -192,15 +192,16 @@ async def arequest_pinned(
     url: str,
     *,
     block_private: bool = False,
-    timeout: float = 10.0,
+    timeout: float | httpx.Timeout = 10.0,
     headers: Optional[dict] = None,
     json: Optional[object] = None,
     content: Optional[bytes | str] = None,
 ) -> httpx.Response:
     """One request, no redirects, connected only to the checked addresses.
 
-    Reminder webhooks and ntfy attach a bearer token. Following a redirect
-    or re-resolving DNS would send that token to a different host.
+    Reminder webhooks, ntfy, and image generation attach a bearer token.
+    Following a redirect or re-resolving DNS would send that token to a
+    different host.
     """
     ips = resolve_pinned_ips(url, block_private=block_private)
     async with httpx.AsyncClient(

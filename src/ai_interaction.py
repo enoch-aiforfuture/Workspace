@@ -964,7 +964,7 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
     import httpx
     import os
     from pathlib import Path
-    from src.pinned_fetch import PinnedFetchError, aget_pinned
+    from src.pinned_fetch import PinnedFetchError, aget_pinned, arequest_pinned
 
     lines = content.strip().split("\n")
     prompt = lines[0].strip() if lines else ""
@@ -1095,104 +1095,114 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
     logger.info(f"Image generation: model={model_id}, size={size}, quality={quality}, prompt={prompt[:80]}")
 
     try:
-        # GPT image models can take 30-120s+ depending on quality
-        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0)) as client:
-            resp = await client.post(images_url, json=payload, headers=headers)
+        # GPT image models can take 30-120s+ depending on quality. The API
+        # key rides on this request, so the connect stays on the address
+        # snapshot from the safety check and redirects are not followed.
+        block_private = os.getenv("IMAGE_BLOCK_PRIVATE_IPS", "false").lower() == "true"
+        resp = await arequest_pinned(
+            "POST",
+            images_url,
+            json=payload,
+            headers=headers,
+            block_private=block_private,
+            timeout=httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0),
+        )
 
-            if resp.status_code != 200:
-                error_text = resp.text[:500]
-                try:
-                    err_json = resp.json()
-                    error_text = err_json.get("error", {}).get("message", error_text) if isinstance(err_json.get("error"), dict) else str(err_json.get("error", error_text))
-                except Exception:
-                    pass
-                return {
-                    "error": f"Image generation failed ({resp.status_code}): {error_text}",
-                    "untrusted_content": True,
-                }
+        if resp.status_code != 200:
+            error_text = resp.text[:500]
+            try:
+                err_json = resp.json()
+                error_text = err_json.get("error", {}).get("message", error_text) if isinstance(err_json.get("error"), dict) else str(err_json.get("error", error_text))
+            except Exception:
+                pass
+            return {
+                "error": f"Image generation failed ({resp.status_code}): {error_text}",
+                "untrusted_content": True,
+            }
 
-            data = resp.json()
-            images = data.get("data", [])
-            if not images:
-                return {"error": "No images returned from API"}
+        data = resp.json()
+        images = data.get("data", [])
+        if not images:
+            return {"error": "No images returned from API"}
 
-            img = images[0]
-            image_url = None
-            image_id = None
+        img = images[0]
+        image_url = None
+        image_id = None
 
-            def _save_to_gallery(filename: str) -> str:
-                """Insert a GalleryImage row and return the new id (or '')."""
-                try:
-                    from src.database import SessionLocal as _GallerySL, GalleryImage
-                    new_id = str(uuid.uuid4())
-                    _gdb = _GallerySL()
-                    _gdb.add(GalleryImage(
-                        id=new_id,
-                        filename=filename,
-                        prompt=prompt,
-                        model=model_id,
-                        size=size,
-                        quality=payload.get("quality", "medium"),
-                        session_id=session_id,
-                        owner=owner,
-                    ))
-                    _gdb.commit()
-                    _gdb.close()
-                    return new_id
-                except Exception as _ge:
-                    logger.warning(f"Failed to save gallery record: {_ge}")
-                    return ""
+        def _save_to_gallery(filename: str) -> str:
+            """Insert a GalleryImage row and return the new id (or '')."""
+            try:
+                from src.database import SessionLocal as _GallerySL, GalleryImage
+                new_id = str(uuid.uuid4())
+                _gdb = _GallerySL()
+                _gdb.add(GalleryImage(
+                    id=new_id,
+                    filename=filename,
+                    prompt=prompt,
+                    model=model_id,
+                    size=size,
+                    quality=payload.get("quality", "medium"),
+                    session_id=session_id,
+                    owner=owner,
+                ))
+                _gdb.commit()
+                _gdb.close()
+                return new_id
+            except Exception as _ge:
+                logger.warning(f"Failed to save gallery record: {_ge}")
+                return ""
 
-            # GPT image models always return b64_json; DALL-E may return url
-            if img.get("b64_json"):
+        # GPT image models always return b64_json; DALL-E may return url
+        if img.get("b64_json"):
+            img_dir = Path(GENERATED_IMAGES_DIR)
+            img_dir.mkdir(parents=True, exist_ok=True)
+            filename = f"{uuid.uuid4().hex[:12]}.png"
+            img_path = img_dir / filename
+            img_path.write_bytes(base64.b64decode(img.get("b64_json")))
+            image_url = f"/api/generated-image/{filename}"
+            image_id = _save_to_gallery(filename)
+
+        elif img.get("url"):
+            # Download external URL and save locally (DALL-E returns temp URLs).
+            # Pin the connect to the addresses the safety check just allowed,
+            # and re-check every redirect. A plain httpx.get re-resolves DNS
+            # and would follow a 3xx to link-local metadata.
+            result_url = img["url"]
+            try:
+                dl_resp = await aget_pinned(
+                    result_url, block_private=block_private, timeout=60
+                )
+            except PinnedFetchError as exc:
+                return {"error": f"Image API returned unsafe image URL: {exc}"}
+            except Exception as _dl_e:
+                logger.warning(f"Failed to download DALL-E image: {_dl_e}")
+                image_url = result_url
+                dl_resp = None
+            if dl_resp is not None and dl_resp.status_code == 200:
                 img_dir = Path(GENERATED_IMAGES_DIR)
                 img_dir.mkdir(parents=True, exist_ok=True)
                 filename = f"{uuid.uuid4().hex[:12]}.png"
                 img_path = img_dir / filename
-                img_path.write_bytes(base64.b64decode(img.get("b64_json")))
+                img_path.write_bytes(dl_resp.content)
                 image_url = f"/api/generated-image/{filename}"
                 image_id = _save_to_gallery(filename)
+            elif dl_resp is not None:
+                image_url = result_url  # fallback to external URL
+        else:
+            return {"error": "Image API returned unexpected format (no b64_json or url)"}
 
-            elif img.get("url"):
-                # Download external URL and save locally (DALL-E returns temp URLs).
-                # Pin the connect to the addresses the safety check just allowed,
-                # and re-check every redirect. A plain httpx.get re-resolves DNS
-                # and would follow a 3xx to link-local metadata.
-                result_url = img["url"]
-                block_private = os.getenv("IMAGE_BLOCK_PRIVATE_IPS", "false").lower() == "true"
-                try:
-                    dl_resp = await aget_pinned(
-                        result_url, block_private=block_private, timeout=60
-                    )
-                except PinnedFetchError as exc:
-                    return {"error": f"Image API returned unsafe image URL: {exc}"}
-                except Exception as _dl_e:
-                    logger.warning(f"Failed to download DALL-E image: {_dl_e}")
-                    image_url = result_url
-                    dl_resp = None
-                if dl_resp is not None and dl_resp.status_code == 200:
-                    img_dir = Path(GENERATED_IMAGES_DIR)
-                    img_dir.mkdir(parents=True, exist_ok=True)
-                    filename = f"{uuid.uuid4().hex[:12]}.png"
-                    img_path = img_dir / filename
-                    img_path.write_bytes(dl_resp.content)
-                    image_url = f"/api/generated-image/{filename}"
-                    image_id = _save_to_gallery(filename)
-                elif dl_resp is not None:
-                    image_url = result_url  # fallback to external URL
-            else:
-                return {"error": "Image API returned unexpected format (no b64_json or url)"}
+        return {
+            "results": f"Generated image for: {prompt[:100]}",
+            "image_url": image_url,
+            "image_id": image_id,
+            "image_prompt": prompt,
+            "image_model": model_id,
+            "image_size": size,
+            "image_quality": payload.get("quality", "medium"),
+        }
 
-            return {
-                "results": f"Generated image for: {prompt[:100]}",
-                "image_url": image_url,
-                "image_id": image_id,
-                "image_prompt": prompt,
-                "image_model": model_id,
-                "image_size": size,
-                "image_quality": payload.get("quality", "medium"),
-            }
-
+    except PinnedFetchError as exc:
+        return {"error": f"Image generation endpoint rejected: {exc}"}
     except httpx.TimeoutException:
         return {"error": "Image generation timed out (300s). The model may be overloaded — try again or use quality=low."}
     except Exception as e:
