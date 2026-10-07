@@ -512,9 +512,17 @@ def _get_http_client() -> httpx.AsyncClient:
     global _http_client
     if _http_client is None or _http_client.is_closed:
         from src.tls_overrides import llm_verify
+        from src.pinned_fetch import pin_async_client_connects
+        # The API key rides on this client. A later DNS answer must not move
+        # the socket onto a link-local address, and a redirect must not
+        # either. Local and LAN model servers stay allowed.
         _http_client = httpx.AsyncClient(
-            limits=_http_limits, http2=False, verify=llm_verify(),
+            limits=_http_limits,
+            http2=False,
+            verify=llm_verify(),
+            follow_redirects=False,
         )
+        pin_async_client_connects(_http_client)
     return _http_client
 
 def _get_cached_response(cache_key: str) -> Optional[str]:

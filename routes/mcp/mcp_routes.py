@@ -9,7 +9,6 @@ from pathlib import Path
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, HTMLResponse
 import logging
-import httpx
 
 from core.database import McpServer, SessionLocal
 from core.middleware import require_admin
@@ -551,8 +550,12 @@ def setup_mcp_routes(mcp_manager: McpManager):
 
             redirect_uri = _mcp_oauth_redirect_uri()
 
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
+            # The client secret rides on this POST. Pin the connect so a
+            # rebinding answer for the token host is not where it is sent.
+            from src.pinned_fetch import PinnedFetchError, arequest_pinned
+            try:
+                resp = await arequest_pinned(
+                    "POST",
                     "https://oauth2.googleapis.com/token",
                     data={
                         "code": code,
@@ -561,6 +564,13 @@ def setup_mcp_routes(mcp_manager: McpManager):
                         "redirect_uri": redirect_uri,
                         "grant_type": "authorization_code",
                     },
+                    block_private=True,
+                    timeout=10.0,
+                )
+            except PinnedFetchError as e:
+                return HTMLResponse(
+                    _oauth_result_page("Error", f"Token endpoint rejected: {e}"),
+                    status_code=502,
                 )
 
             if resp.status_code != 200:

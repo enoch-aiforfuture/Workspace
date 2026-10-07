@@ -115,6 +115,74 @@ class _PinnedAsyncBackend(httpcore.AsyncNetworkBackend):
         return await self._real.sleep(seconds)
 
 
+def _connect_check_url(host: str) -> str:
+    """URL whose host is classified before a shared client connects."""
+    name = (host or "").strip()
+    if name.startswith("[") and "]" in name:
+        return f"https://{name}/"
+    if ":" in name:
+        return f"https://[{name}]/"
+    return f"https://{name}/"
+
+
+class _CheckingAsyncBackend(httpcore.AsyncNetworkBackend):
+    """Check the host at connect time, then connect only to that snapshot.
+
+    A long-lived client talks to many hosts, so it cannot carry one IP list
+    from construction. Each new TCP connection resolves once. An idle pooled
+    connection keeps the address it already checked.
+    """
+
+    def __init__(self, *, block_private: bool = False):
+        self._block_private = block_private
+        self._real = httpcore.AnyIOBackend()
+
+    async def connect_tcp(self, host, port, timeout=None, local_address=None,
+                          socket_options=None):
+        if isinstance(host, (bytes, bytearray)):
+            host = host.decode("ascii", "replace")
+        hostname = str(host or "").strip()
+        if not hostname:
+            raise httpcore.ConnectError("missing host")
+        try:
+            ips = resolve_pinned_ips(
+                _connect_check_url(hostname),
+                block_private=self._block_private,
+            )
+        except PinnedFetchError as exc:
+            raise httpcore.ConnectError(str(exc)) from exc
+        deadline = None if timeout is None else time.monotonic() + timeout
+        last_exc: Optional[Exception] = None
+        for ip in ips:
+            remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+            try:
+                return await self._real.connect_tcp(
+                    str(ip), port, remaining, local_address, socket_options
+                )
+            except (httpcore.ConnectError, httpcore.ConnectTimeout) as exc:
+                last_exc = exc
+                if deadline is not None and time.monotonic() >= deadline:
+                    break
+        if last_exc is not None:
+            raise last_exc
+        raise httpcore.ConnectError("no validated address available")
+
+    async def connect_unix_socket(self, path, timeout=None, socket_options=None):
+        return await self._real.connect_unix_socket(path, timeout, socket_options)
+
+    async def sleep(self, seconds: float) -> None:
+        return await self._real.sleep(seconds)
+
+
+def pin_async_client_connects(client: httpx.AsyncClient, *, block_private: bool = False) -> None:
+    """Pin new connections on a client that is reused across hosts."""
+    transport = getattr(client, "_transport", None)
+    pool = getattr(transport, "_pool", None)
+    if pool is None or not hasattr(pool, "_network_backend"):
+        raise PinnedFetchError("client transport cannot pin connections")
+    pool._network_backend = _CheckingAsyncBackend(block_private=block_private)
+
+
 class _PinnedAsyncTransport(httpx.AsyncBaseTransport):
     """Pin the TCP destination. Host, SNI, and the request URL stay unchanged."""
 
