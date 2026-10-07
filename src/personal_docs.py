@@ -6,7 +6,12 @@ import logging
 from typing import List, Dict, Set, Any, Tuple
 from dataclasses import dataclass
 
-from src.index_walk import path_stays_inside, prune_index_dirs, is_indexable_file
+from src.index_walk import (
+    is_hardlinked_file,
+    is_indexable_file,
+    path_stays_inside,
+    prune_index_dirs,
+)
 
 from src.markitdown_runtime import MARKITDOWN_EXTS
 
@@ -139,7 +144,7 @@ def load_personal_index(
             if not is_indexable_file(name):
                 continue
             p = os.path.join(root, name)
-            if not os.path.isfile(p) or os.path.islink(p):
+            if not os.path.isfile(p) or os.path.islink(p) or is_hardlinked_file(p):
                 continue
             if not path_stays_inside(p, personal_dir):
                 continue
