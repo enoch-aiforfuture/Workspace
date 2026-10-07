@@ -183,6 +183,55 @@ def test_auth_disabled_null_user_can_mutate_gallery(monkeypatch, tmp_path):
     assert removed.status_code == 200
 
 
+def test_auth_enabled_null_user_cannot_create_unowned_album_or_upload(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.delenv("LOCALHOST_BYPASS", raising=False)
+    client = _client_with_gallery(monkeypatch, tmp_path)
+
+    album = client.post("/api/gallery/albums", json={"name": "Orphan"})
+    upload = client.post("/api/gallery/upload")
+    assert album.status_code == 401
+    assert upload.status_code == 401
+
+    db = gallery_routes.SessionLocal()
+    try:
+        assert {row.id for row in db.query(GalleryAlbum).all()} == {"album-alice", "album-bob"}
+    finally:
+        db.close()
+
+
+def test_auth_disabled_null_user_can_create_an_album(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    client = _client_with_gallery(monkeypatch, tmp_path)
+
+    album = client.post("/api/gallery/albums", json={"name": "Library"})
+    assert album.status_code == 200
+    created_id = album.json()["id"]
+
+    db = gallery_routes.SessionLocal()
+    try:
+        row = db.query(GalleryAlbum).filter(GalleryAlbum.id == created_id).one()
+        assert row.owner is None
+    finally:
+        db.close()
+
+
+def test_named_user_album_is_stamped_with_that_owner(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.setattr(gallery_routes, "get_current_user", lambda request: "alice")
+    client = _client_with_gallery(monkeypatch, tmp_path)
+
+    album = client.post("/api/gallery/albums", json={"name": "Alice only"})
+    assert album.status_code == 200
+
+    db = gallery_routes.SessionLocal()
+    try:
+        row = db.query(GalleryAlbum).filter(GalleryAlbum.id == album.json()["id"]).one()
+        assert row.owner == "alice"
+    finally:
+        db.close()
+
+
 def test_auth_enabled_null_user_mutations_fail_closed(monkeypatch, tmp_path):
     monkeypatch.setenv("AUTH_ENABLED", "true")
     client = _client_with_gallery(monkeypatch, tmp_path)

@@ -971,7 +971,7 @@ def setup_session_routes(
         if not OPENAI_API_KEY:
             raise HTTPException(400, "Server missing OPENAI_API_KEY")
         sid = str(uuid.uuid4())
-        user = effective_user(request)
+        user = _session_user(request)
         session = session_manager.create_session(
             session_id=sid,
             name="",

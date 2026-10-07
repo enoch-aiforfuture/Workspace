@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from core.database import SessionLocal, GalleryImage, GalleryAlbum, ModelEndpoint
 from core.database import Session as DbSession
-from src.auth_helpers import _auth_disabled, get_current_user, owner_filter, require_privilege
+from src.auth_helpers import _auth_disabled, get_current_user, owner_filter, require_privilege, require_user
 from src.upload_limits import (
     read_upload_limited,
     GALLERY_UPLOAD_MAX_BYTES,
@@ -205,6 +205,22 @@ def _ground_text_to_box(image, text: str, *, threshold: float = 0.05):
         raise HTTPException(500, f"Object mask failed: {exc}") from exc
 
 
+def _gallery_user(request: Request):
+    """Identity for gallery writes that store ``owner`` on a new row.
+
+    Reads go through ``_owner_filter``, which already matches nothing when
+    auth is on and the user is missing. Upload and album create used that
+    missing user as the row owner, leaving an unowned file or album behind.
+    ``get_current_user`` stays the first lookup so tests can patch it.
+    """
+    user = get_current_user(request)
+    if user:
+        return user
+    if _auth_disabled():
+        return None
+    return require_user(request) or None
+
+
 def _current_user_is_admin(request: Request, user: str | None) -> bool:
     if not user:
         return False
@@ -355,12 +371,11 @@ def setup_gallery_routes() -> APIRouter:
         import uuid
         from pathlib import Path
 
+        user = _gallery_user(request)
         form = await request.form()
         file = form.get("file")
         if not file or not hasattr(file, 'filename'):
             raise HTTPException(400, "No file provided")
-
-        user = get_current_user(request)
         album_id = form.get("album_id") or None
         content = await read_upload_limited(file, GALLERY_UPLOAD_MAX_BYTES, "Gallery upload")
 
@@ -851,7 +866,7 @@ def setup_gallery_routes() -> APIRouter:
     @router.post("/api/gallery/albums")
     async def create_album(request: Request):
         import uuid
-        user = get_current_user(request)
+        user = _gallery_user(request)
         data = await request.json()
         name = (data.get("name") or "").strip()
         if not name:

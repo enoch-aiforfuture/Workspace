@@ -504,6 +504,18 @@ def _account_visible_to_owner(row, owner: str) -> bool:
         getattr(row, "from_address", None) or "",
     }
 
+
+def fixture_message_visible(row_owner, owner) -> bool:
+    """Whether a fixture inbox row is visible to this caller.
+
+    An empty caller is the single-user fixture file. A named caller sees
+    only rows stamped with that owner. A row with no owner is not shared.
+    """
+    caller = str(owner or "").strip()
+    if not caller:
+        return True
+    return str(row_owner or "").strip() == caller
+
 def _q(name: str) -> str:
     """Quote an IMAP mailbox name. Defensive: escapes `\\` and `"` and wraps
     in double quotes so user-supplied folder names with spaces or quotes can't

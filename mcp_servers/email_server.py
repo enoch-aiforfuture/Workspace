@@ -885,7 +885,8 @@ def _fixture_email_rows(owner: str | None = None) -> list[dict]:
         if not isinstance(row, dict):
             continue
         row_owner = str(row.get("owner") or "").strip()
-        if owner and row_owner and row_owner != owner:
+        from routes.email_helpers import fixture_message_visible
+        if not fixture_message_visible(row_owner, owner):
             continue
         out.append(_fixture_email_record(row, i, owner or row_owner))
     out.sort(key=lambda item: item.get("date_epoch") or 0, reverse=True)

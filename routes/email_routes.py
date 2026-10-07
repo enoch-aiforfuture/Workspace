@@ -46,6 +46,7 @@ from src.upload_limits import read_upload_limited, EMAIL_COMPOSE_UPLOAD_MAX_BYTE
 from routes.email_helpers import (
     _strip_think, _extract_reply, _apply_email_style_mechanics, require_owner, require_user, _assert_owns_account,
     _account_visible_to_owner,
+    fixture_message_visible,
     _q, _attach_compose_uploads, _cleanup_compose_uploads,
     _load_settings, _save_settings, _get_email_config,
     _send_smtp_message, _smtp_security_mode,
@@ -1741,7 +1742,7 @@ def setup_email_routes():
             if not isinstance(row, dict):
                 continue
             row_owner = str(row.get("owner") or "").strip()
-            if owner and row_owner and row_owner != owner:
+            if not fixture_message_visible(row_owner, owner):
                 continue
             out.append(_fixture_email_record(row, i, owner))
         out.sort(key=lambda e: e.get("date_epoch") or 0, reverse=True)
