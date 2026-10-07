@@ -98,8 +98,11 @@ def setup_backup_routes(memory_manager, preset_manager, skills_manager) -> APIRo
                     continue
                 if mem["text"].strip().lower() in existing_texts:
                     continue  # skip duplicates
-                # Assign owner when auth is enabled
-                if user and not mem.get("owner"):
+                # The file's owner is untrusted. Export only contains the
+                # signed-in user's rows, and import restores into that same
+                # account. Keeping a crafted owner would write the memory
+                # into another tenant.
+                if user:
                     mem["owner"] = user
                 existing.append(mem)
                 existing_texts.add(mem["text"].strip().lower())
@@ -114,7 +117,7 @@ def setup_backup_routes(memory_manager, preset_manager, skills_manager) -> APIRo
             # rows (load_all) meant a skill whose id/name/title matched any
             # other user's was silently skipped, so the importing user lost
             # their own data — same cross-tenant bug fixed for memories above.
-            # The full store is still saved back below.
+            # add_skill writes only the new skill; it does not save `existing` back.
             own = [s for s in existing if s.get("owner") == user]
             existing_names = {s.get("name") for s in own if s.get("name")}
             existing_ids = {s.get("id") for s in own if s.get("id")}
@@ -140,9 +143,9 @@ def setup_backup_routes(memory_manager, preset_manager, skills_manager) -> APIRo
                     continue
                 if title.lower() in existing_titles:
                     continue
-                owner = skill.get("owner")
-                if user and not owner:
-                    owner = user
+                # Same rule as memories: a signed-in import always lands in
+                # the importer's account, even if the file names someone else.
+                owner = user if user else skill.get("owner")
                 # Skills live on disk as SKILL.md files; the old JSON-era
                 # skills_manager.save() no longer exists. Write each new skill
                 # via add_skill (source="user" skips auto-dedup — this is an

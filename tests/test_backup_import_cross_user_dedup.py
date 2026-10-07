@@ -54,6 +54,13 @@ def test_user_can_import_memory_matching_another_users_text(monkeypatch):
     assert ("bob", "buy milk") in texts_by_owner     # other tenant preserved
 
 
+def test_import_stamps_the_importer_when_the_file_names_someone_else(monkeypatch):
+    endpoint, saved = _setup(monkeypatch, [])
+    body = {"memories": [{"text": "secret", "owner": "bob"}]}
+    asyncio.run(endpoint(_Req(body)))
+    assert saved["entries"] == [{"text": "secret", "owner": "alice"}]
+
+
 def test_users_own_duplicate_is_still_skipped(monkeypatch):
     endpoint, saved = _setup(monkeypatch, [{"text": "buy milk", "owner": "alice"}])
     body = {"memories": [{"text": "Buy Milk"}]}
