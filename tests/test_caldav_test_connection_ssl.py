@@ -46,9 +46,18 @@ def client():
 
 def _make_fake_async_client(captured):
     """Return a fake httpx.AsyncClient class that captures constructor kwargs."""
+    class _Pool:
+        def __init__(self):
+            self._network_backend = object()
+
+    class _Transport:
+        def __init__(self):
+            self._pool = _Pool()
+
     class FakeAsyncClient:
         def __init__(self, **kwargs):
             captured.update(kwargs)
+            self._transport = _Transport()
 
         async def __aenter__(self):
             return self

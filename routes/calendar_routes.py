@@ -1083,6 +1083,11 @@ def setup_calendar_routes(upload_handler=None) -> APIRouter:
                 else:
                     logger.warning("CalDAV test: CA bundle %s not found, using system CAs", _ca_bundle)
             async with httpx.AsyncClient(timeout=8.0, follow_redirects=False, trust_env=False, verify=_ssl_ctx) as cx:
+                # validate_caldav_url already checked this host. Pin the
+                # socket so a later DNS answer cannot move the password.
+                from src.pinned_fetch import pin_async_client_connects
+                from src.caldav_sync import _private_caldav_allowed
+                pin_async_client_connects(cx, block_private=not _private_caldav_allowed())
                 r = await cx.request(
                     "PROPFIND", url,
                     auth=(user, pw),

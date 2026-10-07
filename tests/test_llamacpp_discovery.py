@@ -68,7 +68,7 @@ class TestLlamaCppFingerprint:
                 return _FakeResponse(self.LLAMACPP_PROPS)
             return _FakeResponse({}, ok=False)
 
-        monkeypatch.setattr("src.model_discovery.httpx.get", fake_get)
+        monkeypatch.setattr("src.model_discovery._sync_get", fake_get)
         assert discovery._fingerprint_provider("localhost", 8080) == "llamacpp"
 
     def test_lmstudio_still_wins_when_both_match(self, monkeypatch):
@@ -87,7 +87,7 @@ class TestLlamaCppFingerprint:
                 return _FakeResponse(self.LLAMACPP_PROPS)
             return _FakeResponse({}, ok=False)
 
-        monkeypatch.setattr("src.model_discovery.httpx.get", fake_get)
+        monkeypatch.setattr("src.model_discovery._sync_get", fake_get)
         assert discovery._fingerprint_provider("localhost", 8080) == "lmstudio"
 
     def test_props_without_llamacpp_keys_not_detected(self, monkeypatch):
@@ -101,7 +101,7 @@ class TestLlamaCppFingerprint:
                 return _FakeResponse({"unrelated": "value"})
             return _FakeResponse({}, ok=False)
 
-        monkeypatch.setattr("src.model_discovery.httpx.get", fake_get)
+        monkeypatch.setattr("src.model_discovery._sync_get", fake_get)
         assert discovery._fingerprint_provider("localhost", 8080) is None
 
     def test_props_unreachable_returns_none(self, monkeypatch):
@@ -113,7 +113,7 @@ class TestLlamaCppFingerprint:
                 return _FakeResponse({}, ok=False)
             raise OSError("connection refused")
 
-        monkeypatch.setattr("src.model_discovery.httpx.get", fake_get)
+        monkeypatch.setattr("src.model_discovery._sync_get", fake_get)
         assert discovery._fingerprint_provider("localhost", 8080) is None
 
     def test_check_port_attaches_llamacpp_provider(self, monkeypatch):
@@ -129,7 +129,7 @@ class TestLlamaCppFingerprint:
                 return _FakeResponse(self.LLAMACPP_PROPS)
             return _FakeResponse({}, ok=False)
 
-        monkeypatch.setattr("src.model_discovery.httpx.get", fake_get)
+        monkeypatch.setattr("src.model_discovery._sync_get", fake_get)
         result = discovery._check_port("localhost", 8080)
         assert result is not None
         assert result["provider"] == "llamacpp"
@@ -171,7 +171,7 @@ class TestDockerLoopbackScan:
                 })
             return _FakeResponse({}, ok=False)
 
-        monkeypatch.setattr("src.model_discovery.httpx.get", fake_get)
+        monkeypatch.setattr("src.model_discovery._sync_get", fake_get)
         result = discovery._check_port("host.docker.internal", 8080)
         assert result is not None
         assert "host.docker.internal" in result["url"]

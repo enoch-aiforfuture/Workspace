@@ -7,7 +7,6 @@ import json
 import time
 import ipaddress
 import logging
-import httpx
 from urllib.parse import urlparse
 from fastapi import HTTPException
 from fastapi import UploadFile
@@ -16,6 +15,12 @@ from typing import List, Optional
 from src.upload_limits import format_byte_limit, get_chat_upload_max_bytes
 
 logger = logging.getLogger(__name__)
+
+
+def _sync_get(url, **kwargs):
+    """Pinned GET for the LM Studio capability probe. Tests replace this."""
+    from src.pinned_fetch import sync_get
+    return sync_get(url, **kwargs)
 
 
 def extract_urls(text: str) -> List[str]:
@@ -114,7 +119,7 @@ def _probe_lmstudio_models(url: str) -> Optional[list]:
     authority = host if parsed.port is None else f"{host}:{parsed.port}"
     probe_url = f"{parsed.scheme or 'http'}://{authority}/api/v1/models"
     try:
-        r = httpx.get(probe_url, timeout=1.0)
+        r = _sync_get(probe_url, timeout=1.0)
     except Exception:
         return None
     try:

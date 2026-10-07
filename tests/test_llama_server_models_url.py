@@ -49,7 +49,7 @@ def test_model_context_queries_models_for_v1_base(monkeypatch):
             request=request,
         )
 
-    monkeypatch.setattr(model_context.httpx, "get", fake_get)
+    monkeypatch.setattr(model_context, "_sync_get", fake_get)
 
     assert model_context._query_context_length("http://127.0.0.1:8080/v1", "qwen3") == (32768, True)
     assert seen == [
