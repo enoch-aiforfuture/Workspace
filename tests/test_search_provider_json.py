@@ -38,8 +38,8 @@ def _offline(monkeypatch):
     monkeypatch.setenv("SERPER_API_KEY", "k")
     monkeypatch.setenv("GOOGLE_API_KEY", "k")
     monkeypatch.setenv("GOOGLE_PSE_CX", "cx")
-    monkeypatch.setattr(providers.httpx, "post", lambda *a, **k: _BadJSONResponse())
-    monkeypatch.setattr(providers.httpx, "get", lambda *a, **k: _BadJSONResponse())
+    monkeypatch.setattr(providers, "_sync_post", lambda *a, **k: _BadJSONResponse())
+    monkeypatch.setattr(providers, "_sync_get", lambda *a, **k: _BadJSONResponse())
 
 
 def test_tavily_malformed_json_returns_empty():

@@ -6,13 +6,18 @@ import os
 import wave
 import logging
 import hashlib
-import httpx
 from pathlib import Path
 from typing import Optional, Dict, Any
 
 from src.constants import TTS_CACHE_DIR
 
 logger = logging.getLogger(__name__)
+
+
+def _sync_post(url, **kwargs):
+    """Pinned POST. Tests replace this; the API key rides on the request."""
+    from src.pinned_fetch import sync_post
+    return sync_post(url, **kwargs)
 
 
 def _safe_speed(value, default: float = 1.0) -> float:
@@ -186,7 +191,15 @@ class TTSService:
         }
 
         try:
-            r = httpx.post(url, json=payload, headers=headers, timeout=60)
+            # Local speech servers stay reachable. The pin still refuses a
+            # later DNS answer that lands on a link-local address.
+            r = _sync_post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=60,
+                block_private=False,
+            )
             r.raise_for_status()
             logger.info(f"API TTS: {len(r.content)} bytes from {base_url}")
             return r.content

@@ -10,10 +10,27 @@ import httpx
 from bs4 import BeautifulSoup
 
 from src.constants import SEARXNG_INSTANCE, REQUEST_TIMEOUT, WEB_FETCH_USER_AGENT
+from src.pinned_fetch import PinnedFetchError
 from .analytics import RateLimitError, error_logger
 from .query import build_enhanced_query
 
 logger = logging.getLogger(__name__)
+
+# A rejected pin is a network failure for these callers: return no results
+# instead of letting the search tool crash.
+_NET_ERRORS = (httpx.RequestError, PinnedFetchError)
+
+
+def _sync_get(url, **kwargs):
+    """Pinned GET. Tests replace this."""
+    from src.pinned_fetch import sync_get
+    return sync_get(url, **kwargs)
+
+
+def _sync_post(url, **kwargs):
+    """Pinned POST. Tests replace this."""
+    from src.pinned_fetch import sync_post
+    return sync_post(url, **kwargs)
 
 # Provider registry — maps setting value to (label, needs_key, needs_url)
 PROVIDER_INFO = {
@@ -184,11 +201,14 @@ def searxng_search_api(query: str, count: Optional[int] = None, categories: str 
             ]
 
         def _run(search_params):
-            response = httpx.get(
+            # A self-hosted SearXNG may be on a private address. Link-local
+            # answers are still rejected by the pin.
+            response = _sync_get(
                 f"{instance}/search",
                 params=search_params,
                 headers=headers or None,
                 timeout=15,
+                block_private=False,
             )
             response.raise_for_status()
             data = response.json()
@@ -254,11 +274,12 @@ def searxng_search(query, max_results=10):
     if api_key:
         req_headers["Authorization"] = f"Bearer {api_key}"
     try:
-        response = httpx.get(
+        response = _sync_get(
             f"{instance}/search",
             params={"q": query, "safesearch": _safesearch_for("searxng")},
             headers=req_headers,
             timeout=10,
+            block_private=False,
         )
         if response.is_success:
             soup = BeautifulSoup(response.text, "html.parser")
@@ -314,16 +335,17 @@ def _brave_search_impl(query: str, count: int, time_filter: Optional[str] = None
 
     logger.info(f"Executing Brave search with query: {enhanced_query}")
     try:
-        response = httpx.get(
+        response = _sync_get(
             "https://api.search.brave.com/res/v1/web/search",
             headers=headers,
             params=params,
             timeout=REQUEST_TIMEOUT,
+            block_private=True,
         )
         if response.status_code == 429:
             raise RateLimitError("Brave rate limit hit")
         response.raise_for_status()
-    except httpx.RequestError as e:
+    except _NET_ERRORS as e:
         error_logger.error(f"NetworkError during Brave search: {e}")
         return []
     except RateLimitError as e:
@@ -386,11 +408,12 @@ def duckduckgo_search(query: str, count: Optional[int] = None, time_filter: Opti
     count = count if count is not None else _get_result_count()
     def _html_fallback() -> List[dict]:
         try:
-            response = httpx.get(
+            response = _sync_get(
                 "https://html.duckduckgo.com/html/",
                 params={"q": query, "kp": _safesearch_for("duckduckgo_html")},
                 headers={"User-Agent": WEB_FETCH_USER_AGENT},
                 timeout=REQUEST_TIMEOUT,
+                block_private=True,
             )
             response.raise_for_status()
             soup = BeautifulSoup(response.text, "html.parser")
@@ -485,15 +508,16 @@ def google_pse_search(query: str, count: Optional[int] = None, time_filter: Opti
             params["dateRestrict"] = time_map[time_filter]
 
     try:
-        response = httpx.get(
+        response = _sync_get(
             "https://www.googleapis.com/customsearch/v1",
             params=params,
             timeout=REQUEST_TIMEOUT,
+            block_private=True,
         )
         if response.status_code == 429:
             raise RateLimitError("Google PSE rate limit hit")
         response.raise_for_status()
-    except httpx.RequestError as e:
+    except _NET_ERRORS as e:
         error_logger.error(f"Google PSE search failed: {e}")
         return []
     except RateLimitError as e:
@@ -542,16 +566,17 @@ def tavily_search(query: str, count: Optional[int] = None, time_filter: Optional
             payload["days"] = {"day": 1, "week": 7, "month": 30, "year": 365}[time_filter]
 
     try:
-        response = httpx.post(
+        response = _sync_post(
             "https://api.tavily.com/search",
             json=payload,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             timeout=REQUEST_TIMEOUT,
+            block_private=True,
         )
         if response.status_code == 429:
             raise RateLimitError("Tavily rate limit hit")
         response.raise_for_status()
-    except httpx.RequestError as e:
+    except _NET_ERRORS as e:
         error_logger.error(f"Tavily search failed: {e}")
         return []
     except RateLimitError as e:
@@ -603,16 +628,17 @@ def serper_search(query: str, count: Optional[int] = None, time_filter: Optional
             payload["tbs"] = time_map[time_filter]
 
     try:
-        response = httpx.post(
+        response = _sync_post(
             "https://google.serper.dev/search",
             json=payload,
             headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
             timeout=REQUEST_TIMEOUT,
+            block_private=True,
         )
         if response.status_code == 429:
             raise RateLimitError("Serper rate limit hit")
         response.raise_for_status()
-    except httpx.RequestError as e:
+    except _NET_ERRORS as e:
         error_logger.error(f"Serper search failed: {e}")
         return []
     except RateLimitError as e:
