@@ -3,7 +3,7 @@
 import logging
 from fastapi import APIRouter, HTTPException, Request
 from src.cleanup_service import get_cleanup_preview, cleanup_sessions
-from src.auth_helpers import get_current_user
+from src.auth_helpers import require_user
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,10 @@ def setup_cleanup_routes(session_manager):
         Returns:
             JSON response with lists of sessions that would be archived/deleted and estimated space savings
         """
-        user = get_current_user(request)
+        # require_user, not bare get_current_user. The service treats a
+        # missing owner as the whole library, so an anonymous request would
+        # preview and then archive or delete every account's sessions.
+        user = require_user(request) or None
         try:
             preview = await get_cleanup_preview(owner=user)
             return preview
@@ -45,7 +48,7 @@ def setup_cleanup_routes(session_manager):
         Returns:
             JSON response with counts of deleted and archived sessions, and space freed
         """
-        user = get_current_user(request)
+        user = require_user(request) or None
         try:
             archived_count, deleted_count, space_freed_mb = await cleanup_sessions(session_manager, owner=user)
             return {

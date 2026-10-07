@@ -12,8 +12,8 @@ Security invariant under test:
       1. _apply_owner_filter uses strict equality for authenticated callers —
          no null-OR predicate, no cross-owner rows (tests 1–3).
 
-      2. owner=None (single-user / auth-disabled mode) leaves the query
-         unfiltered — intentional, mirrors owner_filter() in auth_helpers.py.
+      2. owner=None leaves the query unfiltered only when auth is disabled.
+         When auth is on, a missing owner matches nothing.
 
       3. Both routes forward the resolved caller identity as `owner=` to the
          service layer; they do not hardcode a value or drop the parameter
@@ -118,12 +118,13 @@ def test_apply_owner_filter_excludes_cross_owner_rows(cleanup_imports):
     assert ("owner", "eq", "bob") not in q.filters
 
 
-def test_apply_owner_filter_none_bypasses_filter_for_single_user_mode(cleanup_imports):
-    """owner=None (auth disabled / single-user) must leave the query unfiltered.
+def test_apply_owner_filter_none_bypasses_filter_for_single_user_mode(monkeypatch, cleanup_imports):
+    """owner=None leaves the query unfiltered only when auth is disabled.
 
-    Intentional: mirrors owner_filter() in src/auth_helpers.py — in a
-    single-user deployment there are no other tenants to protect.
+    Intentional for a single-user deployment. When auth is on, a missing
+    owner must match nothing so a skipped route gate cannot clean every tenant.
     """
+    monkeypatch.setenv("AUTH_ENABLED", "false")
     apply_owner_filter, _ = cleanup_imports
     q = _Query()
     result = apply_owner_filter(q, _SessionModel, None)
@@ -133,6 +134,17 @@ def test_apply_owner_filter_none_bypasses_filter_for_single_user_mode(cleanup_im
         f"but filter clauses were applied: {q.filters}"
     )
     assert result is q
+
+
+def test_apply_owner_filter_none_matches_nothing_when_auth_is_on(monkeypatch, cleanup_imports):
+    """Auth-on plus owner=None must not return the unfiltered query."""
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    apply_owner_filter, _ = cleanup_imports
+    q = _Query()
+    apply_owner_filter(q, _SessionModel, None)
+
+    assert False in q.filters
+    assert q.filters != []
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +165,7 @@ def test_preview_route_passes_caller_identity_as_owner(monkeypatch, cleanup_impo
         "estimated_space_freed_mb": 0.0,
     })
     monkeypatch.setattr("routes.cleanup_routes.get_cleanup_preview", mock_preview)
-    monkeypatch.setattr("routes.cleanup_routes.get_current_user", lambda _req: "alice")
+    monkeypatch.setattr("routes.cleanup_routes.require_user", lambda _req: "alice")
 
     app = FastAPI()
     app.include_router(setup_cleanup_routes(MagicMock()))
@@ -174,7 +186,7 @@ def test_cleanup_route_passes_caller_identity_as_owner(monkeypatch, cleanup_impo
 
     mock_cleanup = AsyncMock(return_value=(3, 2, 1.5))
     monkeypatch.setattr("routes.cleanup_routes.cleanup_sessions", mock_cleanup)
-    monkeypatch.setattr("routes.cleanup_routes.get_current_user", lambda _req: "alice")
+    monkeypatch.setattr("routes.cleanup_routes.require_user", lambda _req: "alice")
 
     sm = MagicMock()
     app = FastAPI()
@@ -189,3 +201,58 @@ def test_cleanup_route_passes_caller_identity_as_owner(monkeypatch, cleanup_impo
     assert body["deleted_count"] == 2
     assert body["space_freed_mb"] == 1.5
     mock_cleanup.assert_awaited_once_with(sm, owner="alice")
+
+
+def test_no_identity_cannot_preview_or_run_cleanup(monkeypatch, cleanup_imports):
+    """A configured deployment must 401 before cleanup sees a missing owner."""
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("AUTH_ENABLED", "true")
+    monkeypatch.delenv("LOCALHOST_BYPASS", raising=False)
+    _, setup_cleanup_routes = cleanup_imports
+
+    preview = AsyncMock(return_value={})
+    run = AsyncMock(return_value=(0, 0, 0.0))
+    monkeypatch.setattr("routes.cleanup_routes.get_cleanup_preview", preview)
+    monkeypatch.setattr("routes.cleanup_routes.cleanup_sessions", run)
+
+    app = FastAPI()
+    app.state.auth_manager = SimpleNamespace(is_configured=True)
+    app.include_router(setup_cleanup_routes(MagicMock()))
+    client = TestClient(app)
+
+    preview_resp = client.get("/api/cleanup/preview")
+    run_resp = client.post("/api/cleanup")
+
+    assert preview_resp.status_code == 401
+    assert run_resp.status_code == 401
+    preview.assert_not_awaited()
+    run.assert_not_awaited()
+
+
+def test_auth_disabled_cleanup_uses_the_single_user_library(monkeypatch, cleanup_imports):
+    """Auth-off still cleans the one library, which the service sees as owner=None."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.delenv("LOCALHOST_BYPASS", raising=False)
+    _, setup_cleanup_routes = cleanup_imports
+
+    preview = AsyncMock(return_value={"sessions_to_archive": [], "sessions_to_delete": []})
+    run = AsyncMock(return_value=(0, 0, 0.0))
+    monkeypatch.setattr("routes.cleanup_routes.get_cleanup_preview", preview)
+    monkeypatch.setattr("routes.cleanup_routes.cleanup_sessions", run)
+
+    app = FastAPI()
+    app.include_router(setup_cleanup_routes(MagicMock()))
+    client = TestClient(app)
+
+    assert client.get("/api/cleanup/preview").status_code == 200
+    assert client.post("/api/cleanup").status_code == 200
+    preview.assert_awaited_once_with(owner=None)
+    run.assert_awaited_once()
+    assert run.await_args.kwargs["owner"] is None
