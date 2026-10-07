@@ -14,6 +14,7 @@ from urllib.parse import urlparse, urlunparse
 
 from core.database import SessionLocal, ModelEndpoint
 from src.llm_core import _detect_provider, _host_match, _is_kimi_code_url, KIMI_CODE_USER_AGENT, _ollama_api_root
+from src.owner_identity import scoped_read_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -392,6 +393,11 @@ def resolve_endpoint(
     if not ep_id:
         return fallback_url, fallback_model, fallback_headers
 
+    # A missing owner must not load whichever enabled row matches the id.
+    # That row can belong to another user and carries their API key.
+    if not scoped_read_allowed(owner):
+        return fallback_url, fallback_model, fallback_headers
+
     db = SessionLocal()
     try:
         ep = db.query(ModelEndpoint).filter(
@@ -447,6 +453,8 @@ def _resolve_endpoint_by_id_with_descriptor(
     a configured fallback entry ({endpoint_id, model}) into a dispatch target.
     """
     if not ep_id:
+        return None
+    if not scoped_read_allowed(owner):
         return None
     db = SessionLocal()
     try:
@@ -535,6 +543,12 @@ def resolve_route_descriptor(
     """
 
     if not endpoint_url or not model:
+        return {
+            "endpoint_id": None,
+            "endpoint_label": "Selected route",
+            "endpoint_cost_tracked": endpoint_cost_tracked(endpoint_url),
+        }
+    if not scoped_read_allowed(owner):
         return {
             "endpoint_id": None,
             "endpoint_label": "Selected route",

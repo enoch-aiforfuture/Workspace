@@ -89,6 +89,11 @@ def _resolve_model(spec: str, owner: Optional[str] = None, model_type: Optional[
     from src.llm_core import _detect_provider, ANTHROPIC_MODELS
     from src.auth_helpers import owner_filter
 
+    from src.owner_identity import scoped_read_allowed
+
+    if not scoped_read_allowed(owner):
+        raise ValueError("No enabled endpoints found")
+
     spec = spec.strip()
     target_endpoint_name = None
 

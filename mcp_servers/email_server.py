@@ -1829,16 +1829,17 @@ async def _ai_draft_reply_to_email(uid, folder="INBOX", reply_all=False, account
         seen.add(key)
         candidates.append((url, model, headers))
 
+    mcp_owner = _current_owner() or None
     try:
-        _add(*resolve_endpoint("utility", owner=None))
+        _add(*resolve_endpoint("utility", owner=mcp_owner))
     except Exception:
         pass
     try:
-        _add(*resolve_endpoint("default", owner=None))
+        _add(*resolve_endpoint("default", owner=mcp_owner))
     except Exception:
         pass
     try:
-        utility_fallbacks = resolve_utility_fallback_candidates(owner=None) or []
+        utility_fallbacks = resolve_utility_fallback_candidates(owner=mcp_owner) or []
     except TypeError:
         utility_fallbacks = resolve_utility_fallback_candidates() or []
     for cand in utility_fallbacks:
