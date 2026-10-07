@@ -27,7 +27,7 @@ from src.request_models import MemoryAddRequest
 from core.database import SessionLocal
 from src.llm_core import llm_call_async
 from services.memory.memory_extractor import audit_memories
-from src.auth_helpers import get_current_user, require_user
+from src.auth_helpers import require_user
 from src.endpoint_resolver import resolve_endpoint
 from src.task_endpoint import resolve_task_endpoint
 from src.upload_limits import read_upload_limited, MEMORY_IMPORT_MAX_BYTES
@@ -56,7 +56,14 @@ def setup_memory_routes(memory_manager: MemoryManager, session_manager: SessionM
     router = APIRouter(prefix="/api/memory", tags=["memory"])
 
     def _owner(request: Request) -> Optional[str]:
-        return get_current_user(request)
+        # require_user, not bare get_current_user. load(owner=None) returns
+        # every memory, and _verify_memory_owner returns immediately when
+        # user is None, so a request with no identity was treated as
+        # auth-disabled and could read or edit every account's memories.
+        # require_user 401s that caller when auth is configured.
+        # AUTH_ENABLED=false, loopback bypass, and unconfigured first-run
+        # still resolve to None.
+        return require_user(request) or None
 
     def _assert_session_owner(session_obj, user):
         """SECURITY: 404 if the caller does not own this session.

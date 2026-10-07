@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from services.memory.skills import SkillsManager
-from src.auth_helpers import get_current_user
+from src.auth_helpers import require_user
 from src.prompt_security import untrusted_context_message
 from core.middleware import require_admin
 
@@ -1184,7 +1184,13 @@ def setup_skills_routes(skills_manager: SkillsManager) -> APIRouter:
     router = APIRouter(prefix="/api/skills", tags=["skills"])
 
     def _owner(request: Request) -> Optional[str]:
-        return get_current_user(request)
+        # require_user, not bare get_current_user. load(owner=None) returns
+        # every skill, and _verify_owner returns immediately when user is
+        # None, so a request with no identity was treated as auth-disabled
+        # and could read or edit every account's skills. require_user 401s
+        # that caller when auth is configured. AUTH_ENABLED=false, loopback
+        # bypass, and unconfigured first-run still resolve to None.
+        return require_user(request) or None
 
     def _verify_owner(skill: dict, user: Optional[str]):
         if user is None:
