@@ -19,10 +19,14 @@ class _AuthManager:
 
 
 class _Request:
-    def __init__(self, user=None, auth_manager=None, body=None):
-        self.state = SimpleNamespace(current_user=user)
+    def __init__(self, user=None, auth_manager=None, body=None, *, api_token=False, host="127.0.0.1"):
+        self.state = SimpleNamespace(
+            current_user="api" if api_token else user,
+            api_token=api_token,
+            api_token_owner=user if api_token else None,
+        )
         self.app = SimpleNamespace(state=SimpleNamespace(auth_manager=auth_manager))
-        self.client = SimpleNamespace(host="127.0.0.1")
+        self.client = SimpleNamespace(host=host)
         self._body = body
 
     async def json(self):
@@ -127,7 +131,7 @@ def test_download_file_denies_anonymous_when_auth_is_configured(tmp_path, monkey
     with pytest.raises(HTTPException) as exc:
         asyncio.run(download_file(_Request(auth_manager=_AuthManager()), alice_id))
 
-    assert exc.value.status_code == 403
+    assert exc.value.status_code == 401
 
 
 def test_download_file_denies_cross_owner_without_leaking_file(tmp_path, monkeypatch):
@@ -322,12 +326,68 @@ def test_download_file_survives_corrupted_uploads_json(tmp_path, monkeypatch):
     download_file = _upload_endpoints(handler, monkeypatch)["download_file"]
     (upload_dir / "uploads.json").write_text('{"alice:h1": {', encoding="utf-8")
 
-    # No auth configured -> owner gate skipped.
+    # Loopback with no auth manager is the first-run bypass, so a corrupt
+    # index still serves the file. A non-loopback caller is rejected below.
     response = asyncio.run(download_file(_Request(), alice_id))
 
     assert str(response.path).endswith(alice_id)
     # Metadata unreadable, so the display filename falls back to the file_id.
     assert response.filename == alice_id
+
+
+def test_download_file_rejects_remote_caller_when_auth_is_not_configured(tmp_path, monkeypatch):
+    handler, alice_id, _bob_id, _upload_dir = _make_upload_store(tmp_path, monkeypatch)
+    download_file = _upload_endpoints(handler, monkeypatch)["download_file"]
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(download_file(_Request(host="10.1.2.3"), alice_id))
+
+    assert exc.value.status_code == 401
+
+
+def test_auth_disabled_anonymous_can_read_an_owned_upload(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    handler, _alice_id, bob_id, _upload_dir = _make_upload_store(tmp_path, monkeypatch)
+    download_file = _upload_endpoints(handler, monkeypatch)["download_file"]
+
+    response = asyncio.run(
+        download_file(_Request(auth_manager=_AuthManager()), bob_id)
+    )
+
+    assert str(response.path).endswith(bob_id)
+
+
+def test_admin_api_token_cannot_read_another_users_upload(tmp_path, monkeypatch):
+    handler, _alice_id, bob_id, _upload_dir = _make_upload_store(tmp_path, monkeypatch)
+    download_file = _upload_endpoints(handler, monkeypatch)["download_file"]
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            download_file(
+                _Request(
+                    user="admin",
+                    api_token=True,
+                    auth_manager=_AuthManager(admins={"admin"}),
+                ),
+                bob_id,
+            )
+        )
+
+    assert exc.value.status_code == 404
+
+
+def test_api_token_can_read_its_owners_upload(tmp_path, monkeypatch):
+    handler, alice_id, _bob_id, _upload_dir = _make_upload_store(tmp_path, monkeypatch)
+    download_file = _upload_endpoints(handler, monkeypatch)["download_file"]
+
+    response = asyncio.run(
+        download_file(
+            _Request(user="alice", api_token=True, auth_manager=_AuthManager()),
+            alice_id,
+        )
+    )
+
+    assert str(response.path).endswith(alice_id)
 
 
 def test_put_vision_text_returns_400_on_malformed_json(tmp_path, monkeypatch):
