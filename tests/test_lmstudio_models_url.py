@@ -128,7 +128,7 @@ def test_llm_core_list_model_ids_queries_v1_models_for_lmstudio(monkeypatch):
             request=request,
         )
 
-    monkeypatch.setattr(llm_core.httpx, "get", fake_get)
+    monkeypatch.setattr(llm_core, "_sync_get", fake_get)
 
     assert llm_core.list_model_ids("http://localhost:1234/v1", timeout=1) == [
         "lmstudio-community/Meta-Llama-3-8B-Instruct-GGUF",
@@ -151,7 +151,7 @@ def test_llm_core_list_model_ids_queries_v1_models_for_bare_lmstudio(monkeypatch
         request = httpx.Request("GET", url)
         return httpx.Response(200, json={"data": [{"id": "model-a"}]}, request=request)
 
-    monkeypatch.setattr(llm_core.httpx, "get", fake_get)
+    monkeypatch.setattr(llm_core, "_sync_get", fake_get)
 
     assert llm_core.list_model_ids("http://localhost:1234", timeout=1) == ["model-a"]
     assert seen == ["http://localhost:1234/v1/models"]
@@ -169,6 +169,6 @@ def test_llm_core_list_model_ids_handles_empty_lmstudio_list(monkeypatch):
         request = httpx.Request("GET", url)
         return httpx.Response(200, json={"object": "list", "data": []}, request=request)
 
-    monkeypatch.setattr(llm_core.httpx, "get", fake_get)
+    monkeypatch.setattr(llm_core, "_sync_get", fake_get)
 
     assert llm_core.list_model_ids("http://localhost:1234/v1", timeout=1) == []

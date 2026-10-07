@@ -101,7 +101,6 @@ def verify_oauth_state(state: str) -> dict | None:
 
 def _refresh_google_token(account_id: str) -> str | None:
     """Exchange the stored refresh token for a new access token and persist it."""
-    import httpx
     from core.database import SessionLocal as _SL, EmailAccount as _EA
     from src.secret_storage import encrypt as _enc, decrypt as _dec
     client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
@@ -116,12 +115,18 @@ def _refresh_google_token(account_id: str) -> str | None:
         refresh_token = _dec(row.oauth_refresh_token or "")
         if not refresh_token:
             return None
-        resp = httpx.post("https://oauth2.googleapis.com/token", data={
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "refresh_token": refresh_token,
-            "grant_type": "refresh_token",
-        }, timeout=10)
+        from src.pinned_fetch import sync_post
+        resp = sync_post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+            },
+            timeout=10,
+            block_private=True,
+        )
         resp.raise_for_status()
         data = resp.json()
         access_token = data["access_token"]

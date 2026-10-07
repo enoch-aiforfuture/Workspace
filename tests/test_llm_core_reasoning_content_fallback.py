@@ -38,7 +38,7 @@ def _openai_msg(content, reasoning_content=None):
 
 def test_llm_call_returns_reasoning_content_when_content_empty(monkeypatch):
     monkeypatch.setattr(
-        llm_core.httpx, "post",
+        llm_core, "_sync_post",
         lambda *a, **kw: _sync_response(_openai_msg("", "I reasoned through it")),
     )
     result = llm_core.llm_call(
@@ -75,7 +75,7 @@ def test_llm_call_async_returns_reasoning_content_when_content_empty(monkeypatch
 
 def test_llm_call_content_wins_over_reasoning_content(monkeypatch):
     monkeypatch.setattr(
-        llm_core.httpx, "post",
+        llm_core, "_sync_post",
         lambda *a, **kw: _sync_response(
             _openai_msg("Normal answer", "some reasoning")
         ),

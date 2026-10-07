@@ -55,6 +55,14 @@ def test_loopback_and_lan_allowed_by_default_local_first():
     # Local-first: a localhost / LAN embedding server is a legitimate target.
     assert check_outbound_url("http://localhost:8080/v1", resolver=LOOPBACK)[0] is True
     assert check_outbound_url("http://nas.local:1234/v1", resolver=LAN)[0] is True
+    # CPython marks ::1 reserved as well as loopback. It is still local.
+    ipv6_loopback = _resolver({"localhost": ["::1"]})
+    ok, reason = check_outbound_url("http://localhost:11434/v1", resolver=ipv6_loopback)
+    assert ok is True, reason
+    ok, reason = check_outbound_url(
+        "http://localhost:11434/v1", block_private=True, resolver=ipv6_loopback
+    )
+    assert ok is False and "loopback" in reason
 
 
 def test_strict_mode_blocks_private_and_loopback():

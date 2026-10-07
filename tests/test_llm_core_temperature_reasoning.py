@@ -48,7 +48,7 @@ def _capture_openai_payload(
             json={"choices": [{"message": {"content": "OK"}}]},
         )
 
-    monkeypatch.setattr(llm_core.httpx, "post", fake_post)
+    monkeypatch.setattr(llm_core, "_sync_post", fake_post)
     result = llm_core.llm_call(
         url,
         model,

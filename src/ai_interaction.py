@@ -160,7 +160,8 @@ def _resolve_model(spec: str, owner: Optional[str] = None, model_type: Optional[
                 try:
                     models_url = build_models_url(base)
                     if models_url:
-                        r = httpx.get(models_url, headers=headers, timeout=5)
+                        from src.pinned_fetch import sync_get
+                        r = sync_get(models_url, headers=headers, timeout=5)
                         r.raise_for_status()
                         endpoint_reachable = True
                         data = r.json()
