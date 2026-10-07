@@ -21,7 +21,7 @@ from core.database import (
     Note,
     Session as DbSession,
 )
-from src.auth_helpers import effective_user
+from src.auth_helpers import _auth_disabled, effective_user, require_user
 from src.attachment_refs import attachment_refs_from_metadata
 from src.constants import GENERATED_IMAGES_DIR
 from src.upload_handler import (
@@ -31,6 +31,20 @@ from src.upload_handler import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def upload_owner(request) -> str | None:
+    """Who an uploaded file is stored under.
+
+    A missing user is the single-user library only when auth is off.
+    Otherwise require_user 401s before the bytes are written with no owner.
+    """
+    user = effective_user(request)
+    if user:
+        return user
+    if _auth_disabled():
+        return None
+    return require_user(request) or None
 
 
 def upload_session_belongs_to_owner(session_owner, owner: str | None) -> bool:
@@ -276,7 +290,8 @@ def setup_upload_routes(upload_handler):
             session_id = None
         if not files:
             raise HTTPException(400, "No files uploaded")
-            
+        owner = upload_owner(request)
+
         client_ip = request.client.host if request.client else "unknown"
         out = []
 
@@ -298,7 +313,6 @@ def setup_upload_routes(upload_handler):
         
         for u in files:
             try:
-                owner = effective_user(request)
                 meta = upload_handler.save_upload(u, client_ip, owner=owner)
                 gallery_id = _promote_chat_image_to_gallery(meta, owner, session_id)
                 item = {
