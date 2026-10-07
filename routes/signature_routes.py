@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from core.database import SessionLocal, Signature
-from src.auth_helpers import get_current_user
+from src.auth_helpers import require_user
 
 logger = logging.getLogger(__name__)
 
@@ -80,12 +80,23 @@ def _to_dict(s: Signature) -> Dict[str, Any]:
     }
 
 
+def _caller(request: Request) -> Optional[str]:
+    """Acting user. A missing identity is single-user mode only when auth is off.
+
+    list_signatures returns every row when the user is missing, and delete
+    skips the owner check for a falsy user. require_user 401s that caller
+    when auth is configured. AUTH_ENABLED=false, loopback bypass, and
+    unconfigured first-run still resolve to None.
+    """
+    return require_user(request) or None
+
+
 def setup_signature_routes() -> APIRouter:
     router = APIRouter(tags=["signatures"])
 
     @router.get("/api/signatures")
     async def list_signatures(request: Request) -> Dict[str, Any]:
-        user = get_current_user(request)
+        user = _caller(request)
         db = SessionLocal()
         try:
             q = db.query(Signature)
@@ -100,7 +111,7 @@ def setup_signature_routes() -> APIRouter:
 
     @router.post("/api/signatures")
     async def create_signature(request: Request, req: SignatureCreate) -> Dict[str, Any]:
-        user = get_current_user(request)
+        user = _caller(request)
         b64 = _normalize_signature_png(req.data)
         width = _signature_dimension(req.width)
         height = _signature_dimension(req.height)
@@ -129,7 +140,7 @@ def setup_signature_routes() -> APIRouter:
 
     @router.delete("/api/signatures/{sig_id}")
     async def delete_signature(sig_id: str, request: Request) -> Dict[str, Any]:
-        user = get_current_user(request)
+        user = _caller(request)
         db = SessionLocal()
         try:
             sig = db.query(Signature).filter(Signature.id == sig_id).first()

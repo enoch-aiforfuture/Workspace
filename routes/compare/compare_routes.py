@@ -11,7 +11,7 @@ import logging
 
 from core.database import Comparison, SessionLocal
 from core.session_manager import SessionManager
-from src.auth_helpers import get_current_user
+from src.auth_helpers import require_user
 from routes.session_routes import _reject_raw_endpoint_url_for_non_admin
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,16 @@ class RecordVoteRequest(BaseModel):
     is_blind: bool = True
 
 
+def _caller(request: Request):
+    """Acting user for comparison routes.
+
+    A missing user used to skip owner filters, so list/vote/delete and the
+    endpoint lookup (which can copy another account's API key) ran as
+    single-user mode. require_user 401s that caller when auth is configured.
+    """
+    return require_user(request) or None
+
+
 def setup_compare_routes(session_manager: SessionManager):
     """Setup comparison routes."""
 
@@ -84,7 +94,7 @@ def setup_compare_routes(session_manager: SessionManager):
         Returns the comparison ID and the two session IDs so the client
         can fire two independent SSE streams to /api/chat_stream.
         """
-        user = getattr(request.state, 'current_user', None)
+        user = _caller(request)
         comp_id = str(uuid.uuid4())
         sid_a = str(uuid.uuid4())
         sid_b = str(uuid.uuid4())
@@ -241,7 +251,7 @@ def setup_compare_routes(session_manager: SessionManager):
         winner: str = Form(...),  # "left", "right", or "tie"
     ):
         """Record the user's vote and reveal model names if blind."""
-        user = get_current_user(request)
+        user = _caller(request)
         db = SessionLocal()
         try:
             comp = db.query(Comparison).filter(Comparison.id == comp_id).first()
@@ -283,7 +293,7 @@ def setup_compare_routes(session_manager: SessionManager):
     @router.post("/record")
     def record_comparison(request: Request, body: RecordVoteRequest):
         """Lightweight endpoint to record a comparison vote from the frontend."""
-        user = get_current_user(request)
+        user = _caller(request)
         comp_id = str(uuid.uuid4())
 
         model_a = body.models[0] if len(body.models) > 0 else ""
@@ -320,7 +330,7 @@ def setup_compare_routes(session_manager: SessionManager):
     @router.get("/history")
     def list_comparisons(request: Request):
         """List past comparisons."""
-        user = get_current_user(request)
+        user = _caller(request)
         db = SessionLocal()
         try:
             q = db.query(Comparison)
@@ -346,7 +356,7 @@ def setup_compare_routes(session_manager: SessionManager):
     @router.delete("/{comp_id}")
     def delete_comparison(request: Request, comp_id: str):
         """Delete a comparison and its ephemeral sessions."""
-        user = get_current_user(request)
+        user = _caller(request)
         db = SessionLocal()
         try:
             comp = db.query(Comparison).filter(Comparison.id == comp_id).first()
