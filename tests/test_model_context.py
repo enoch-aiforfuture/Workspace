@@ -261,7 +261,7 @@ class TestGetContextLength:
         def fake_get(*args, **kwargs):
             raise AssertionError("/models must not be queried for a known proxy model")
 
-        monkeypatch.setattr(model_context.httpx, "get", fake_get)
+        monkeypatch.setattr(model_context, "_sync_get", fake_get)
 
         endpoint = "http://100.117.136.97:34521/v1/chat/completions"
         assert model_context.get_context_length(endpoint, "gpt-4o") == 128000
@@ -280,7 +280,7 @@ class TestGetContextLength:
                 {"id": "tiny-proxy-model", "context_length": 8192},
             ]})
 
-        monkeypatch.setattr(model_context.httpx, "get", fake_get)
+        monkeypatch.setattr(model_context, "_sync_get", fake_get)
 
         endpoint = "http://100.117.136.97:34521/v1/chat/completions"
         assert model_context.get_context_length(endpoint, "owl-alpha") == 1048576
@@ -296,7 +296,7 @@ class TestGetContextLength:
         def fake_get(url, *args, **kwargs):
             return _FakeResp({"data": [{"id": "some-other-model", "context_length": 4096}]})
 
-        monkeypatch.setattr(model_context.httpx, "get", fake_get)
+        monkeypatch.setattr(model_context, "_sync_get", fake_get)
 
         endpoint = "http://100.117.136.97:34521/v1/chat/completions"
         assert model_context.get_context_length(endpoint, "absent-model") == model_context.DEFAULT_CONTEXT
@@ -308,7 +308,7 @@ class TestGetContextLength:
         def fake_get(url, *args, **kwargs):
             raise RuntimeError("network down")
 
-        monkeypatch.setattr(model_context.httpx, "get", fake_get)
+        monkeypatch.setattr(model_context, "_sync_get", fake_get)
 
         endpoint = "http://100.117.136.97:34521/v1/chat/completions"
         assert model_context.get_context_length(endpoint, "unknown-proxy-model") == model_context.DEFAULT_CONTEXT

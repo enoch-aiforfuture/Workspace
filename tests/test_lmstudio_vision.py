@@ -37,7 +37,7 @@ class TestLmStudioSupportsVision:
         chat_helpers._lmstudio_models_cache.clear()
 
     def _serve(self, monkeypatch, payload):
-        monkeypatch.setattr(chat_helpers.httpx, "get",
+        monkeypatch.setattr(chat_helpers, "_sync_get",
                             lambda url, timeout=None: _FakeResponse(payload))
 
     def test_vision_true_from_capabilities(self, monkeypatch):
@@ -71,7 +71,7 @@ class TestLmStudioSupportsVision:
             calls["n"] += 1
             return _FakeResponse(self.PAYLOAD)
 
-        monkeypatch.setattr(chat_helpers.httpx, "get", tracking_get)
+        monkeypatch.setattr(chat_helpers, "_sync_get", tracking_get)
         # A cloud provider host must short-circuit to None with no network probe.
         assert chat_helpers.lmstudio_supports_vision(
             "https://api.openai.com/v1/chat/completions", "gpt-4o") is None

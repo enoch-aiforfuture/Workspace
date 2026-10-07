@@ -1,7 +1,6 @@
 import subprocess
 import json
 import time
-import httpx
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -9,6 +8,12 @@ from typing import List, Dict, Any, Optional
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+
+def _sync_get(url, **kwargs):
+    """Pinned GET for local model discovery. Tests replace this."""
+    from src.pinned_fetch import sync_get
+    return sync_get(url, **kwargs)
 
 # Cache for discovered hosts
 _hosts_cache: List[str] = []
@@ -153,7 +158,7 @@ class ModelDiscovery:
     def _fingerprint_provider(self, host: str, port: int) -> Optional[str]:
         """Identify the server software via its native API, independent of port."""
         try:
-            r = httpx.get(f"http://{host}:{port}/api/v1/models", timeout=1.5)
+            r = _sync_get(f"http://{host}:{port}/api/v1/models", timeout=1.5)
             if r.is_success:
                 models = (r.json() or {}).get("models")
                 if (
@@ -170,7 +175,7 @@ class ModelDiscovery:
         # describing the loaded model, slots, and chat template — distinct from
         # LM Studio (/api/v1/models) and vLLM (/version, /metrics).
         try:
-            r = httpx.get(f"http://{host}:{port}/props", timeout=1.5)
+            r = _sync_get(f"http://{host}:{port}/props", timeout=1.5)
             if r.is_success:
                 props = r.json() or {}
                 if isinstance(props, dict) and (
@@ -187,7 +192,7 @@ class ModelDiscovery:
         """Check a single host:port for models."""
         base = f"http://{host}:{port}/v1"
         try:
-            r = httpx.get(f"{base}/models", timeout=3)
+            r = _sync_get(f"{base}/models", timeout=3)
             if not r.is_success:
                 return None
             data = r.json()

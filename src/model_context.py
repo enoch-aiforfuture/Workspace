@@ -12,9 +12,13 @@ from typing import Dict, List, Optional, Tuple
 
 from urllib.parse import urlparse
 
-import httpx
-
 logger = logging.getLogger(__name__)
+
+
+def _sync_get(url, **kwargs):
+    """Pinned GET for context-window probes. Tests replace this."""
+    from src.pinned_fetch import sync_get
+    return sync_get(url, **kwargs)
 
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1", "host.docker.internal"}
 _PRIVATE_NETWORKS = (
@@ -364,7 +368,7 @@ def _proxy_catalog_context(endpoint_url: str, model: str) -> Optional[int]:
     if cat is None:
         from src.endpoint_resolver import build_models_url
         try:
-            r = httpx.get(build_models_url(endpoint_url), timeout=REQUEST_TIMEOUT)
+            r = _sync_get(build_models_url(endpoint_url), timeout=REQUEST_TIMEOUT)
         except Exception as e:
             logger.debug(f"Failed to fetch proxy catalog for context length: {e}")
             return None
@@ -421,7 +425,7 @@ def _query_context_length(endpoint_url: str, model: str) -> Tuple[int, bool]:
     if is_local_endpoint(endpoint_url):
         try:
             base = endpoint_url.split("/v1")[0] if "/v1" in endpoint_url else endpoint_url.rsplit("/", 1)[0]
-            r = httpx.get(f"{base}/slots", timeout=REQUEST_TIMEOUT)
+            r = _sync_get(f"{base}/slots", timeout=REQUEST_TIMEOUT)
             if r.is_success:
                 slots = r.json()
                 if isinstance(slots, list) and slots:
@@ -447,7 +451,7 @@ def _query_context_length(endpoint_url: str, model: str) -> Tuple[int, bool]:
 
     models_url = build_models_url(endpoint_url)
     try:
-        r = httpx.get(models_url, timeout=REQUEST_TIMEOUT)
+        r = _sync_get(models_url, timeout=REQUEST_TIMEOUT)
         if r.is_success:
             data = r.json()
             models_list = data.get("data") or []

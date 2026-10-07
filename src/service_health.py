@@ -145,9 +145,13 @@ def _detail_for(category: str) -> str:
 
 
 def _http_get(url: str, timeout: float = _PROBE_TIMEOUT):
-    """Single network entry point for the HTTP probes (monkeypatched in tests)."""
-    import httpx
-    return httpx.get(url, timeout=timeout)
+    """Single network entry point for the HTTP probes (monkeypatched in tests).
+
+    SearXNG and ntfy may live on a private address, and an ntfy base URL can
+    carry credentials. The pin still refuses a link-local answer.
+    """
+    from src.pinned_fetch import sync_get
+    return sync_get(url, timeout=timeout, block_private=False)
 
 
 def _bounded_map(items: List[Any], worker: Callable[[int, Any], Dict[str, Any]],
