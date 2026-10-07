@@ -32,6 +32,17 @@ from src.upload_handler import (
 
 logger = logging.getLogger(__name__)
 
+
+def upload_session_belongs_to_owner(session_owner, owner: str | None) -> bool:
+    """A named uploader may tag only their own session.
+
+    An empty owner is auth-off single-user mode. A null session owner is
+    not a session every named user may claim.
+    """
+    if not owner:
+        return True
+    return session_owner == owner
+
 router = APIRouter(prefix="/api/upload", tags=["upload"])
 UPLOAD_RESPONSE_HEADERS = {"X-Content-Type-Options": "nosniff"}
 
@@ -186,7 +197,7 @@ def setup_upload_routes(upload_handler):
         sess = db.query(DbSession).filter(DbSession.id == session_id).first()
         if not sess:
             return None
-        if owner and sess.owner and sess.owner != owner:
+        if not upload_session_belongs_to_owner(sess.owner, owner):
             return None
         return session_id
 

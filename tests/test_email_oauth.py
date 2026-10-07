@@ -371,6 +371,46 @@ async def test_callback_owner_mismatch_does_not_write_tokens():
 
 
 @pytest.mark.asyncio
+async def test_callback_null_owner_mailbox_rejects_a_different_user():
+    """A legacy null-owner row is not a mailbox any signed-in user may claim."""
+    from routes.email_helpers import make_oauth_state
+    from core.database import EmailAccount
+
+    db, Factory = _make_db()
+    _make_account(
+        db,
+        account_id="acct-legacy",
+        owner=None,
+        imap_user="bob@example.com",
+        smtp_user="bob@example.com",
+        from_address="bob@example.com",
+    )
+    db.close()
+
+    token_resp = mock.MagicMock()
+    token_resp.raise_for_status = mock.MagicMock()
+    token_resp.json.return_value = {"access_token": "ya29.attacker", "refresh_token": "r", "expires_in": 3600}
+    userinfo_resp = mock.MagicMock()
+    userinfo_resp.is_success = True
+    userinfo_resp.json.return_value = {"email": "bob@example.com", "name": "Bob"}
+
+    state = make_oauth_state("acct-legacy", "alice")
+
+    with mock.patch("httpx.post", return_value=token_resp), \
+         mock.patch("httpx.get", return_value=userinfo_resp), \
+         mock.patch("core.database.SessionLocal", Factory):
+        callback = _callback_endpoint()
+        resp = await callback(code="4/code", state=state, error=None, request=_FakeRequest())
+
+    assert "email_oauth_error=ownership_error" in _location(resp)
+    verify_db = Factory()
+    row = verify_db.query(EmailAccount).filter(EmailAccount.id == "acct-legacy").first()
+    token_after = row.oauth_access_token
+    verify_db.close()
+    assert token_after is None
+
+
+@pytest.mark.asyncio
 async def test_callback_valid_owner_writes_encrypted_tokens_to_intended_account():
     """A signed state whose owner matches the target account writes the tokens —
     and only to that account, stored encrypted (raw token never persisted)."""

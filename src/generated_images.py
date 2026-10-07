@@ -17,6 +17,17 @@ GENERATED_IMAGE_HEADERS = {
 }
 
 
+def generated_image_owned_by(row_owner, user: str | None) -> bool:
+    """Whether a named caller may read a gallery row's generated file.
+
+    ``user`` is None only after the route admits auth-off single-user mode.
+    A named caller must own the row. A null owner is not a shared file.
+    """
+    if not user:
+        return True
+    return row_owner == user
+
+
 def resolve_generated_image_path(filename: str) -> Path:
     if not isinstance(filename, str) or not GENERATED_IMAGE_RE.fullmatch(filename):
         raise HTTPException(status_code=400, detail="Invalid filename")
