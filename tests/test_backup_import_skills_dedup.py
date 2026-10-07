@@ -108,5 +108,19 @@ def test_import_skill_not_dropped_by_other_users_title_collision(monkeypatch):
     )
 
 
+def test_import_skill_stamps_the_importer_when_the_file_names_someone_else(monkeypatch):
+    skills_mgr = FakeSkillsManager([])
+    client = _make_client(skills_mgr, monkeypatch)
+    payload = {
+        "skills": [
+            {"id": "bob-9", "title": "Deploy", "name": "Deploy", "owner": "bob"},
+        ],
+    }
+    resp = client.post("/api/import", json=payload)
+    assert resp.status_code == 200, resp.text
+    owners = {s.get("owner") for s in skills_mgr.rows}
+    assert owners == {"alice"}
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
