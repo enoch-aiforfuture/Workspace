@@ -28,7 +28,7 @@ def test_llm_core_list_model_ids_queries_models_for_v1_base(monkeypatch):
         request = httpx.Request("GET", url)
         return httpx.Response(200, json={"data": [{"id": "qwen3"}]}, request=request)
 
-    monkeypatch.setattr(llm_core.httpx, "get", fake_get)
+    monkeypatch.setattr(llm_core, "_sync_get", fake_get)
 
     assert llm_core.list_model_ids("http://127.0.0.1:8080/v1", timeout=1) == ["qwen3"]
     assert seen == ["http://127.0.0.1:8080/v1/models"]

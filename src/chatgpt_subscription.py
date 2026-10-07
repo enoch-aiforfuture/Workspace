@@ -17,6 +17,8 @@ from typing import Any, Dict, Optional
 import httpx
 from fastapi import HTTPException
 
+from src.pinned_fetch import sync_get as _sync_get, sync_post as _sync_post
+
 DEFAULT_CHATGPT_SUBSCRIPTION_BASE_URL = (
     os.getenv("CHATGPT_SUBSCRIPTION_BASE_URL", "").strip().rstrip("/")
     or "https://chatgpt.com/backend-api/codex"
@@ -91,10 +93,11 @@ def fetch_available_models(access_token: str, timeout: float = 10.0) -> list[str
     if not access_token:
         return []
     try:
-        response = httpx.get(
+        response = _sync_get(
             "https://chatgpt.com/backend-api/codex/models?client_version=1.0.0",
             headers=chatgpt_headers(access_token),
             timeout=timeout,
+            block_private=True,
         )
         if response.status_code != 200:
             return []
@@ -166,11 +169,12 @@ def _json_or_error(response: httpx.Response, action: str) -> Dict[str, Any]:
 
 
 def request_device_code(timeout: float = 15.0) -> Dict[str, Any]:
-    response = httpx.post(
+    response = _sync_post(
         f"{CHATGPT_OAUTH_ISSUER}/api/accounts/deviceauth/usercode",
         json={"client_id": CHATGPT_OAUTH_CLIENT_ID},
         headers={"Content-Type": "application/json"},
         timeout=timeout,
+        block_private=True,
     )
     data = _json_or_error(response, "device-code request")
     if not data.get("device_auth_id") or not data.get("user_code"):
@@ -182,11 +186,12 @@ def request_device_code(timeout: float = 15.0) -> Dict[str, Any]:
 
 
 def poll_device_auth(device_auth_id: str, user_code: str, timeout: float = 15.0) -> Dict[str, Any]:
-    response = httpx.post(
+    response = _sync_post(
         f"{CHATGPT_OAUTH_ISSUER}/api/accounts/deviceauth/token",
         json={"device_auth_id": device_auth_id, "user_code": user_code},
         headers={"Content-Type": "application/json"},
         timeout=timeout,
+        block_private=True,
     )
     if response.status_code in (403, 404):
         return {"status": "pending", "error": "authorization_pending"}
@@ -194,7 +199,7 @@ def poll_device_auth(device_auth_id: str, user_code: str, timeout: float = 15.0)
 
 
 def exchange_authorization_code(authorization_code: str, code_verifier: str, timeout: float = 15.0) -> Dict[str, Any]:
-    response = httpx.post(
+    response = _sync_post(
         CHATGPT_OAUTH_TOKEN_URL,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         data={
@@ -205,6 +210,7 @@ def exchange_authorization_code(authorization_code: str, code_verifier: str, tim
             "code_verifier": code_verifier,
         },
         timeout=timeout,
+        block_private=True,
     )
     data = _json_or_error(response, "token exchange")
     if not data.get("access_token"):
@@ -216,7 +222,7 @@ def refresh_oauth_tokens(access_token: str, refresh_token: str, timeout: float =
     del access_token
     if not refresh_token:
         raise ChatGPTSubscriptionReauthRequired("ChatGPT Subscription is missing a refresh token. Reconnect the provider.")
-    response = httpx.post(
+    response = _sync_post(
         CHATGPT_OAUTH_TOKEN_URL,
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         data={
@@ -225,6 +231,7 @@ def refresh_oauth_tokens(access_token: str, refresh_token: str, timeout: float =
             "client_id": CHATGPT_OAUTH_CLIENT_ID,
         },
         timeout=timeout,
+        block_private=True,
     )
     data = _json_or_error(response, "token refresh")
     if not data.get("access_token"):

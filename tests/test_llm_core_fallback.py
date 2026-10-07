@@ -512,7 +512,7 @@ def test_response_cache_is_partitioned_by_non_secret_header_identity(monkeypatch
             json={"choices": [{"message": {"content": f"answer from {credential}"}}]},
         )
 
-    monkeypatch.setattr(llm_core.httpx, "post", fake_post)
+    monkeypatch.setattr(llm_core, "_sync_post", fake_post)
     messages = [{"role": "user", "content": "same prompt"}]
     try:
         first = llm_core.llm_call(

@@ -125,7 +125,6 @@ async def list_models(content: str, session_id: Optional[str] = None, owner: Opt
     Content = optional filter keyword.
     """
     import json
-    import httpx
     from src.database import SessionLocal, ModelEndpoint
     from src.llm_core import _detect_provider, ANTHROPIC_MODELS
     from src.auth_helpers import owner_filter
@@ -164,7 +163,8 @@ async def list_models(content: str, session_id: Optional[str] = None, owner: Opt
                 try:
                     models_url = build_models_url(base)
                     if models_url:
-                        r = httpx.get(models_url, headers=headers, timeout=5)
+                        from src.pinned_fetch import sync_get
+                        r = sync_get(models_url, headers=headers, timeout=5)
                         r.raise_for_status()
                         data = r.json()
                         model_ids = [m.get("id") for m in (data.get("data") or []) if m.get("id")]

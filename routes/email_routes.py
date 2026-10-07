@@ -6065,15 +6065,20 @@ def setup_email_routes():
             os.environ.get("GOOGLE_OAUTH_REDIRECT_URI")
             or f"{request.url.scheme}://{request.headers.get('host', 'localhost:7000')}/api/email/oauth/google/callback"
         )
-        import httpx as _httpx
+        from src.pinned_fetch import sync_get, sync_post
         try:
-            resp = _httpx.post("https://oauth2.googleapis.com/token", data={
-                "code": code,
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "redirect_uri": redirect_uri,
-                "grant_type": "authorization_code",
-            }, timeout=10)
+            resp = sync_post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "code": code,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "redirect_uri": redirect_uri,
+                    "grant_type": "authorization_code",
+                },
+                timeout=10,
+                block_private=True,
+            )
             resp.raise_for_status()
             data = resp.json()
         except Exception:
@@ -6089,8 +6094,12 @@ def setup_email_routes():
         email_addr = ""
         display_name = ""
         try:
-            ui = _httpx.get("https://www.googleapis.com/oauth2/v1/userinfo",
-                            headers={"Authorization": f"Bearer {access_token}"}, timeout=10)
+            ui = sync_get(
+                "https://www.googleapis.com/oauth2/v1/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=10,
+                block_private=True,
+            )
             if ui.is_success:
                 ui_data = ui.json()
                 email_addr = ui_data.get("email", "")

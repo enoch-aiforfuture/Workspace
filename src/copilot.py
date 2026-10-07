@@ -21,7 +21,7 @@ import os
 from typing import Dict, List, Optional
 from urllib.parse import urlparse
 
-import httpx
+from src.pinned_fetch import sync_get as _sync_get, sync_post as _sync_post
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -151,7 +151,7 @@ def request_device_code(host: str = GITHUB_HOST, *, timeout: float = 10.0) -> Di
     """Start the device flow. Returns GitHub's
     ``{device_code, user_code, verification_uri, expires_in, interval}``.
     """
-    r = httpx.post(
+    r = _sync_post(
         device_code_url(host),
         headers=_oauth_post_headers(),
         json={"client_id": COPILOT_CLIENT_ID, "scope": COPILOT_SCOPE},
@@ -166,7 +166,7 @@ def poll_access_token(host: str, device_code: str, *, timeout: float = 10.0) -> 
     ``error`` field (``authorization_pending``/``slow_down``) while the user
     hasn't authorised yet, or ``{access_token, ...}`` once they have.
     """
-    r = httpx.post(
+    r = _sync_post(
         access_token_url(host),
         headers=_oauth_post_headers(),
         json={
@@ -188,7 +188,7 @@ def fetch_models(base: str, token: str, *, timeout: float = 15.0) -> List[Dict]:
     against API-shape drift).
     """
     url = base.rstrip("/") + "/models"
-    r = httpx.get(url, headers=copilot_headers(token), timeout=timeout)
+    r = _sync_get(url, headers=copilot_headers(token), timeout=timeout)
     r.raise_for_status()
     data = (r.json() or {}).get("data") or []
 

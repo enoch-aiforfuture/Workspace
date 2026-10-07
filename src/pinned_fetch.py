@@ -333,10 +333,10 @@ class _PinnedBackend(httpcore.NetworkBackend):
 class _PinnedTransport(httpx.BaseTransport):
     """Sync transport that pins the socket and keeps the request URL."""
 
-    def __init__(self, ips: list):
+    def __init__(self, ips: list, *, verify: bool | object = True):
         self._pinned_ips = list(ips)
         self._pool = httpcore.ConnectionPool(
-            ssl_context=httpx.create_ssl_context(),
+            ssl_context=httpx.create_ssl_context(verify=verify),
             http1=True,
             http2=False,
             network_backend=_PinnedBackend(ips),
@@ -379,30 +379,91 @@ class _PinnedTransport(httpx.BaseTransport):
         self._pool.close()
 
 
+_VERIFY_UNSET = object()
+
+
 def request_pinned(
     method: str,
     url: str,
     *,
     block_private: bool = False,
-    timeout: float = 10.0,
+    timeout: float | httpx.Timeout = 10.0,
     headers: Optional[dict] = None,
     json: Optional[object] = None,
     content: Optional[bytes] = None,
+    data: Optional[dict] = None,
+    params: Optional[dict] = None,
     auth=None,
+    verify: object = _VERIFY_UNSET,
 ) -> httpx.Response:
     """One request, no redirects, connected only to the checked addresses.
 
     Embedding calls attach a bearer token and CardDAV calls attach basic
     auth. Following a redirect or re-resolving DNS would send those
-    credentials to a different host.
+    credentials to a different host. ``data`` and ``params`` are omitted
+    unless the caller set them. ``verify`` is omitted unless set, so the
+    default TLS context stays the one this transport already used.
     """
     ips = resolve_pinned_ips(url, block_private=block_private)
+    transport = (
+        _PinnedTransport(ips)
+        if verify is _VERIFY_UNSET
+        else _PinnedTransport(ips, verify=verify)
+    )
     with httpx.Client(
-        transport=_PinnedTransport(ips),
+        transport=transport,
         follow_redirects=False,
         timeout=timeout,
     ) as client:
         request_kwargs = {"headers": headers, "json": json, "content": content}
+        if data is not None:
+            request_kwargs["data"] = data
+        if params is not None:
+            request_kwargs["params"] = params
         if auth is not None:
             request_kwargs["auth"] = auth
         return client.request(method, url, **request_kwargs)
+
+
+def sync_get(url: str, *, block_private: bool = False, **kwargs) -> httpx.Response:
+    """``httpx.get`` shape, pinned. Does not follow redirects."""
+    return _sync_request("GET", url, block_private=block_private, **kwargs)
+
+
+def sync_post(url: str, *, block_private: bool = False, **kwargs) -> httpx.Response:
+    """``httpx.post`` shape, pinned. Does not follow redirects."""
+    return _sync_request("POST", url, block_private=block_private, **kwargs)
+
+
+def _sync_request(method: str, url: str, *, block_private: bool = False, **kwargs) -> httpx.Response:
+    timeout = kwargs.pop("timeout", 10.0)
+    if timeout is None:
+        timeout = 10.0
+    headers = kwargs.pop("headers", None)
+    json_body = kwargs.pop("json", None)
+    content = kwargs.pop("content", None)
+    data = kwargs.pop("data", None)
+    params = kwargs.pop("params", None)
+    auth = kwargs.pop("auth", None)
+    verify = kwargs.pop("verify", _VERIFY_UNSET)
+    kwargs.pop("follow_redirects", None)
+    if kwargs:
+        raise PinnedFetchError(
+            "unsupported pinned fetch options: " + ", ".join(sorted(kwargs))
+        )
+    request_kwargs = {
+        "block_private": block_private,
+        "timeout": timeout,
+        "headers": headers,
+        "json": json_body,
+        "content": content,
+    }
+    if data is not None:
+        request_kwargs["data"] = data
+    if params is not None:
+        request_kwargs["params"] = params
+    if auth is not None:
+        request_kwargs["auth"] = auth
+    if verify is not _VERIFY_UNSET:
+        request_kwargs["verify"] = verify
+    return request_pinned(method, url, **request_kwargs)

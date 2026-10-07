@@ -85,8 +85,8 @@ class TestKimiCodeUserAgents:
                 return _Resp(403, '{"error":{"type":"access_terminated_error"}}')
             return _Resp(200, "{}")
 
-        monkeypatch.setattr(llm_core.httpx, "get", lambda *a, **k: (_ for _ in ()).throw(RuntimeError()))
-        monkeypatch.setattr("src.llm_core.httpx.post", fake_post)
+        monkeypatch.setattr(llm_core, "_sync_get", lambda *a, **k: (_ for _ in ()).throw(RuntimeError()))
+        monkeypatch.setattr("src.llm_core._sync_post", fake_post)
         r = httpx_post_kimi_aware(KIMI_CHAT_URL, {"Authorization": "Bearer x"}, json={})
         assert r.status_code == 200
         assert calls[0] == KIMI_CODE_USER_AGENTS[0]
@@ -116,7 +116,7 @@ class TestKimiCodeUserAgents:
             raise AssertionError("async Kimi path must not call sync httpx.get")
 
         client = FakeClient()
-        monkeypatch.setattr(llm_core.httpx, "get", forbidden_sync_get)
+        monkeypatch.setattr(llm_core, "_sync_get", forbidden_sync_get)
 
         r = await llm_core.httpx_post_kimi_aware_async(
             client,
@@ -152,7 +152,7 @@ class TestKimiCodeUserAgents:
             raise AssertionError("async Kimi path must not call sync httpx.get")
 
         client = FakeClient()
-        monkeypatch.setattr(llm_core.httpx, "get", forbidden_sync_get)
+        monkeypatch.setattr(llm_core, "_sync_get", forbidden_sync_get)
 
         r = await llm_core.httpx_post_kimi_aware_async(
             client,
@@ -189,7 +189,7 @@ class TestKimiCodeUserAgents:
             raise AssertionError("streaming Kimi path must not call sync httpx.get")
 
         client = FakeClient()
-        monkeypatch.setattr(llm_core.httpx, "get", forbidden_sync_get)
+        monkeypatch.setattr(llm_core, "_sync_get", forbidden_sync_get)
         monkeypatch.setattr(llm_core, "_get_http_client", lambda: client)
         monkeypatch.setattr(llm_core, "_is_host_dead", lambda url: False)
         monkeypatch.setattr(llm_core, "note_model_activity", lambda *args, **kwargs: None)

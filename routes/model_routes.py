@@ -38,6 +38,18 @@ from src.auth_helpers import (
 
 logger = logging.getLogger(__name__)
 
+
+def _sync_get(url, **kwargs):
+    """Pinned GET for endpoint probes. Tests replace this."""
+    from src.pinned_fetch import sync_get
+    return sync_get(url, **kwargs)
+
+
+def _sync_post(url, **kwargs):
+    """Pinned POST for endpoint probes. Tests replace this."""
+    from src.pinned_fetch import sync_post
+    return sync_post(url, **kwargs)
+
 _SPEECH_ENDPOINT_SETTINGS = (
     ("tts_provider", "tts_model", "tts-1", "Text to Speech"),
     ("stt_provider", "stt_model", "base", "Speech to Text"),
@@ -746,7 +758,7 @@ def _probe_single_model(base: str, api_key: str, model_id: str, timeout: int = 1
 
     try:
         t0 = _time.time()
-        r = httpx.post(target_url, headers=h, json=payload, timeout=timeout, verify=llm_verify())
+        r = _sync_post(target_url, headers=h, json=payload, timeout=timeout, verify=llm_verify())
         latency = round((_time.time() - t0) * 1000)
         if r.is_success:
             return {"status": "ok", "latency_ms": latency}
@@ -944,7 +956,7 @@ def _probe_google_models(base_url: str, api_key: str = None, timeout: int = 5, p
         request_params = dict(params)
         if page_token:
             request_params["pageToken"] = page_token
-        r = httpx.get(url, headers=headers, params=request_params, timeout=timeout, verify=llm_verify())
+        r = _sync_get(url, headers=headers, params=request_params, timeout=timeout, verify=llm_verify())
         r.raise_for_status()
         data = r.json()
         for item in data.get("models") or []:
@@ -990,7 +1002,7 @@ def _probe_endpoint(base_url: str, api_key: str = None, timeout: int = 5) -> Lis
         if api_key:
             headers["x-api-key"] = api_key
         try:
-            r = httpx.get(url, headers=headers, timeout=timeout, verify=llm_verify())
+            r = _sync_get(url, headers=headers, timeout=timeout, verify=llm_verify())
             r.raise_for_status()
             data = r.json()
             models = _openai_model_ids(data)
@@ -1054,7 +1066,7 @@ def _probe_endpoint(base_url: str, api_key: str = None, timeout: int = 5) -> Lis
         parsed = urlparse(base)
         if parsed.port == 11434 or "ollama" in (parsed.hostname or "").lower():
             root = base[:-3].rstrip("/") if base.endswith("/v1") else base
-            r = httpx.get(root + "/api/tags", timeout=timeout, verify=llm_verify())
+            r = _sync_get(root + "/api/tags", timeout=timeout, verify=llm_verify())
             r.raise_for_status()
             data = r.json()
             models = _ollama_model_names(data)
@@ -1131,7 +1143,7 @@ def _ping_endpoint(base_url: str, api_key: str = None, timeout: float = 1.5) -> 
                     break
             for path in ("/api/version", "/api/tags"):
                 try:
-                    r = httpx.get(root + path, timeout=timeout, verify=llm_verify())
+                    r = _sync_get(root + path, timeout=timeout, verify=llm_verify())
                     result = _result_from_response(r)
                     if result["reachable"]:
                         return result
@@ -1142,7 +1154,7 @@ def _ping_endpoint(base_url: str, api_key: str = None, timeout: float = 1.5) -> 
         pass
 
     try:
-        r = httpx.get(base, headers=headers, timeout=timeout, verify=llm_verify())
+        r = _sync_get(base, headers=headers, timeout=timeout, verify=llm_verify())
         result = _result_from_response(r)
         if result["reachable"]:
             return result
@@ -1150,7 +1162,7 @@ def _ping_endpoint(base_url: str, api_key: str = None, timeout: float = 1.5) -> 
         if 400 <= sc < 500 and sc not in (401, 403):
             models_url = _safe_build_models_url(base)
             try:
-                r2 = httpx.get(models_url, headers=headers,timeout=timeout, verify=llm_verify())
+                r2 = _sync_get(models_url, headers=headers,timeout=timeout, verify=llm_verify())
                 result2 = _result_from_response(r2)
                 if result2["reachable"]:
                     return result2

@@ -30,7 +30,7 @@ def test_llm_call_posts_native_ollama_payload(monkeypatch):
             json={"message": {"content": "OK"}, "done": True},
         )
 
-    monkeypatch.setattr(llm_core.httpx, "post", fake_post)
+    monkeypatch.setattr(llm_core, "_sync_post", fake_post)
 
     result = llm_core.llm_call(
         "https://ollama.com/api",
@@ -62,7 +62,7 @@ def test_llm_call_posts_bare_local_ollama_to_native_api(monkeypatch):
             json={"message": {"content": "OK"}, "done": True},
         )
 
-    monkeypatch.setattr(llm_core.httpx, "post", fake_post)
+    monkeypatch.setattr(llm_core, "_sync_post", fake_post)
 
     result = llm_core.llm_call(
         "http://localhost:11434",
@@ -87,7 +87,7 @@ def test_openai_compatible_chat_url_shapes(monkeypatch):
             json={"choices": [{"message": {"content": "OK"}}]},
         )
 
-    monkeypatch.setattr(llm_core.httpx, "post", fake_post)
+    monkeypatch.setattr(llm_core, "_sync_post", fake_post)
     llm_core._response_cache.clear()
 
     cases = [
@@ -119,7 +119,7 @@ def test_list_model_ids_from_openai_compatible_v1(monkeypatch):
             json={"data": [{"id": "qwen2.5-coder:7b"}]},
         )
 
-    monkeypatch.setattr(llm_core.httpx, "get", fake_get)
+    monkeypatch.setattr(llm_core, "_sync_get", fake_get)
 
     assert llm_core.list_model_ids("http://localhost:11434/v1") == ["qwen2.5-coder:7b"]
     assert seen["url"] == "http://localhost:11434/v1/models"
@@ -269,7 +269,7 @@ def test_llm_call_threads_discovered_num_ctx(monkeypatch):
             json={"message": {"content": "OK"}, "done": True},
         )
 
-    monkeypatch.setattr(llm_core.httpx, "post", fake_post)
+    monkeypatch.setattr(llm_core, "_sync_post", fake_post)
 
     llm_core.llm_call(
         "https://ollama.com/api",

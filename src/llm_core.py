@@ -507,6 +507,18 @@ def _clear_host_dead(url: str) -> None:
 _http_client: Optional[httpx.AsyncClient] = None
 _http_limits = httpx.Limits(max_connections=100, max_keepalive_connections=30, keepalive_expiry=30.0)
 
+def _sync_get(url, **kwargs):
+    """Sync GET used for model discovery. Pinned; tests replace this."""
+    from src.pinned_fetch import sync_get
+    return sync_get(url, **kwargs)
+
+
+def _sync_post(url, **kwargs):
+    """Sync POST used by llm_call. Pinned; tests replace this."""
+    from src.pinned_fetch import sync_post
+    return sync_post(url, **kwargs)
+
+
 def _get_http_client() -> httpx.AsyncClient:
     """Return process-wide AsyncClient. Per-request timeout is passed at call time."""
     global _http_client
@@ -878,7 +890,7 @@ def apply_kimi_code_headers(headers: Optional[Dict], url: str) -> Dict[str, str]
         trial = dict(h)
         trial["User-Agent"] = ua
         try:
-            r = httpx.get(models_url, headers=trial, timeout=8, verify=llm_verify())
+            r = _sync_get(models_url, headers=trial, timeout=8, verify=llm_verify())
         except Exception:
             continue
         if _is_kimi_code_access_denied(r.status_code, r.content):
@@ -926,12 +938,12 @@ async def apply_kimi_code_headers_async(client, headers: Optional[Dict], url: st
 def httpx_get_kimi_aware(url: str, headers: Optional[Dict], **kwargs):
     h = apply_kimi_code_headers(headers, url)
     if not _is_kimi_code_url(url):
-        return httpx.get(url, headers=h, **kwargs)
+        return _sync_get(url, headers=h, **kwargs)
     last = None
     for ua in _kimi_code_ua_candidates(url):
         trial = dict(h)
         trial["User-Agent"] = ua
-        last = httpx.get(url, headers=trial, **kwargs)
+        last = _sync_get(url, headers=trial, **kwargs)
         if not _is_kimi_code_access_denied(last.status_code, last.content):
             if last.status_code < 400:
                 _remember_kimi_code_user_agent(url, ua)
@@ -942,12 +954,12 @@ def httpx_get_kimi_aware(url: str, headers: Optional[Dict], **kwargs):
 def httpx_post_kimi_aware(url: str, headers: Optional[Dict], **kwargs):
     h = apply_kimi_code_headers(headers, url)
     if not _is_kimi_code_url(url):
-        return httpx.post(url, headers=h, **kwargs)
+        return _sync_post(url, headers=h, **kwargs)
     last = None
     for ua in _kimi_code_ua_candidates(url):
         trial = dict(h)
         trial["User-Agent"] = ua
-        last = httpx.post(url, headers=trial, **kwargs)
+        last = _sync_post(url, headers=trial, **kwargs)
         if not _is_kimi_code_access_denied(last.status_code, last.content):
             if last.status_code < 400:
                 _remember_kimi_code_user_agent(url, ua)
@@ -1983,7 +1995,7 @@ def list_model_ids(
         try:
             if ":11434" in base_chat_url or "ollama" in base_chat_url.lower():
                 root = base_chat_url.replace("/v1/chat/completions", "").replace("/chat/completions", "").rstrip("/")
-                r = httpx.get(root + "/api/tags", timeout=timeout)
+                r = _sync_get(root + "/api/tags", timeout=timeout)
                 r.raise_for_status()
                 return [m.get("name") or m.get("model") for m in (r.json().get("models") or []) if m.get("name") or m.get("model")]
         except Exception as e:
