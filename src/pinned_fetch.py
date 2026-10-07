@@ -187,6 +187,32 @@ async def aget_pinned(
     raise PinnedFetchError("too many redirects")
 
 
+async def arequest_pinned(
+    method: str,
+    url: str,
+    *,
+    block_private: bool = False,
+    timeout: float = 10.0,
+    headers: Optional[dict] = None,
+    json: Optional[object] = None,
+    content: Optional[bytes | str] = None,
+) -> httpx.Response:
+    """One request, no redirects, connected only to the checked addresses.
+
+    Reminder webhooks and ntfy attach a bearer token. Following a redirect
+    or re-resolving DNS would send that token to a different host.
+    """
+    ips = resolve_pinned_ips(url, block_private=block_private)
+    async with httpx.AsyncClient(
+        transport=_PinnedAsyncTransport(ips),
+        follow_redirects=False,
+        timeout=timeout,
+    ) as client:
+        return await client.request(
+            method, url, headers=headers, json=json, content=content
+        )
+
+
 class _PinnedBackend(httpcore.NetworkBackend):
     """Sync connect limited to one validated address snapshot."""
 

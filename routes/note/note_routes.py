@@ -399,7 +399,6 @@ async def dispatch_reminder(
     webhook_error = ""
     if channel == "webhook":
         try:
-            import httpx
             import json as _wjson
             from src.integrations import load_integrations
             # Built-in payload defaults for known presets so users don't have
@@ -456,8 +455,19 @@ async def dispatch_reminder(
                         if not _ok:
                             webhook_error = f"Webhook URL rejected: {_reason}"
                         else:
-                            async with httpx.AsyncClient(timeout=10.0) as client:
-                                resp = await client.post(url, content=rendered.encode(), headers=hdrs)
+                            from src.pinned_fetch import PinnedFetchError, arequest_pinned
+                            try:
+                                resp = await arequest_pinned(
+                                    "POST",
+                                    url,
+                                    content=rendered.encode(),
+                                    headers=hdrs,
+                                    block_private=_block,
+                                    timeout=10.0,
+                                )
+                            except PinnedFetchError as e:
+                                webhook_error = f"Webhook URL rejected: {e}"
+                            else:
                                 webhook_sent = resp.is_success
                                 if not webhook_sent:
                                     webhook_error = f"Webhook returned HTTP {resp.status_code}"
@@ -470,7 +480,6 @@ async def dispatch_reminder(
     if channel == "ntfy":
         try:
             from src.integrations import load_integrations
-            import httpx
             intg = next(
                 (i for i in load_integrations()
                  if i.get("preset") == "ntfy" and i.get("enabled", True) and i.get("base_url")),
@@ -497,8 +506,19 @@ async def dispatch_reminder(
                 if not _ok:
                     ntfy_error = f"ntfy URL rejected: {_reason}"
                 else:
-                    async with httpx.AsyncClient(timeout=10.0) as client:
-                        resp = await client.post(f"{base}/{topic}", content=ntfy_body, headers=hdrs)
+                    from src.pinned_fetch import PinnedFetchError, arequest_pinned
+                    try:
+                        resp = await arequest_pinned(
+                            "POST",
+                            f"{base}/{topic}",
+                            content=ntfy_body,
+                            headers=hdrs,
+                            block_private=_block,
+                            timeout=10.0,
+                        )
+                    except PinnedFetchError as e:
+                        ntfy_error = f"ntfy URL rejected: {e}"
+                    else:
                         ntfy_sent = resp.is_success
                         if not ntfy_sent:
                             ntfy_error = f"ntfy returned HTTP {resp.status_code}"

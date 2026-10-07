@@ -54,6 +54,9 @@ class _SpyAsyncClient:
         resp.status_code = 200
         return resp
 
+    async def request(self, method, url, **kw):
+        return await self.post(url, **kw)
+
 
 def _dispatch():
     return asyncio.run(dispatch_reminder(
