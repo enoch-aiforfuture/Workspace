@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File, 
 from fastapi.concurrency import run_in_threadpool
 from src.request_models import DirectoryRequest
 from core.constants import BASE_DIR, PERSONAL_DIR, PERSONAL_UPLOADS_DIR
+from src.personal_docs import resolve_personal_documents_dir
 from src.rag_singleton import get_rag_manager
 from src.auth_helpers import require_privilege, require_user
 from core.middleware import require_admin
@@ -163,23 +164,16 @@ def setup_personal_routes(personal_docs_manager, rag_manager, rag_available):
         return get_rag_manager()
 
     def _resolve_allowed_personal_dir(directory: str) -> str:
-        """Resolve a user-supplied personal-docs path under the allowed root."""
-        if not directory:
-            raise HTTPException(400, "Directory path is required")
+        """Resolve a user-supplied personal-docs path under the allowed root.
 
-        # realpath (not abspath) so a symlink inside PERSONAL_DIR that points
-        # outside it is resolved before the commonpath confinement check below;
-        # abspath only normalises `..` and would let such a symlink escape.
-        base_abs = os.path.realpath(PERSONAL_DIR)
-        candidate = directory if os.path.isabs(directory) else os.path.join(base_abs, directory)
-        resolved = os.path.realpath(candidate)
+        resolve_personal_documents_dir uses os.path.realpath so a symlink
+        inside PERSONAL_DIR cannot escape the confinement check.
+        """
         try:
-            in_base = os.path.commonpath([resolved, base_abs]) == base_abs
-        except ValueError:
-            in_base = False
-        if not in_base:
-            raise HTTPException(403, "Directory must be inside personal documents")
-        return resolved
+            return resolve_personal_documents_dir(directory, PERSONAL_DIR)
+        except ValueError as exc:
+            status = 400 if str(exc) == "Directory path is required" else 403
+            raise HTTPException(status, str(exc))
     
     @router.get("")
     def api_personal_list(owner: str = Depends(require_user), _admin: None = Depends(require_admin)):

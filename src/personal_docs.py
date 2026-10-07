@@ -13,6 +13,32 @@ from src.markitdown_runtime import MARKITDOWN_EXTS
 logger = logging.getLogger(__name__)
 
 
+def resolve_personal_documents_dir(directory: str, base: str | None = None) -> str:
+    """Return the real path of a directory inside the personal-docs tree.
+
+    Relative paths resolve under ``base`` (default ``PERSONAL_DIR``).
+    Symlinks are resolved before the containment check so a link inside
+    the tree cannot point indexing or removal at files outside it.
+    Raises ValueError when the path is empty or escapes the tree.
+    """
+    if base is None:
+        from src.constants import PERSONAL_DIR
+        base = PERSONAL_DIR
+    if not directory or not str(directory).strip():
+        raise ValueError("Directory path is required")
+    base_abs = os.path.realpath(base)
+    raw = os.path.expanduser(str(directory).strip())
+    candidate = raw if os.path.isabs(raw) else os.path.join(base_abs, raw)
+    resolved = os.path.realpath(candidate)
+    try:
+        inside = os.path.commonpath([resolved, base_abs]) == base_abs
+    except ValueError:
+        inside = False
+    if not inside:
+        raise ValueError("Directory must be inside personal documents")
+    return resolved
+
+
 def extract_pdf_text(file_path: str) -> str:
     """Extract text from a PDF file using pypdf (permissive, BSD)."""
     try:

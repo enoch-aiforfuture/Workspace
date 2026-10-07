@@ -152,8 +152,48 @@ async def test_do_manage_rag_remove_does_not_rebuild(monkeypatch):
     monkeypatch.setattr(ai, "_rag_manager", _Rag())
     monkeypatch.setattr(ai, "_personal_docs_manager", _PDocs())
 
-    # Untracked path: the old code still fired an unconditional rebuild_index().
+    # A path outside the personal-docs tree is refused before any removal.
+    # The old code still fired an unconditional rebuild_index() here.
     result = await ai.do_manage_rag("remove_directory\n/abs/untracked/dir")
 
     assert calls["rebuild"] == 0, "remove must not rebuild (whole-collection wipe)"
+    assert "error" in result, result
+    assert "personal documents" in result["error"]
+
+
+async def test_do_manage_rag_refuses_to_index_outside_personal_tree(monkeypatch, tmp_path):
+    indexed = []
+
+    class _Rag:
+        def index_personal_documents(self, directory, owner=None):
+            indexed.append(directory)
+            return {"indexed_count": 1}
+
+    monkeypatch.setattr(ai, "_rag_manager", _Rag())
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    result = await ai.do_manage_rag(f"add_directory\n{outside}")
+
+    assert "error" in result, result
+    assert indexed == []
+
+
+async def test_do_manage_rag_indexes_directory_inside_personal_tree(monkeypatch, tmp_path):
+    personal = tmp_path / "personal"
+    docs = personal / "notes"
+    docs.mkdir(parents=True)
+    monkeypatch.setattr("src.constants.PERSONAL_DIR", str(personal))
+    indexed = []
+
+    class _Rag:
+        def index_personal_documents(self, directory, owner=None):
+            indexed.append(directory)
+            return {"indexed_count": 1, "indexed": 1}
+
+    monkeypatch.setattr(ai, "_rag_manager", _Rag())
+
+    result = await ai.do_manage_rag(f"add_directory\n{docs}")
+
     assert "error" not in result, result
+    assert indexed == [os.path.realpath(docs)]

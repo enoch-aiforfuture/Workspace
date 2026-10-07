@@ -574,7 +574,11 @@ async def do_manage_rag(content: str, session_id: Optional[str] = None) -> Dict:
         directory = lines[1].strip()
 
         import os
-        directory = os.path.expanduser(directory)
+        from src.personal_docs import resolve_personal_documents_dir
+        try:
+            directory = resolve_personal_documents_dir(directory)
+        except ValueError as exc:
+            return {"error": str(exc)}
         if not os.path.isdir(directory):
             return {"error": f"Directory not found: {directory}"}
 
@@ -593,6 +597,12 @@ async def do_manage_rag(content: str, session_id: Optional[str] = None) -> Dict:
         if len(lines) < 2:
             return {"error": "remove_directory needs line 2: directory path"}
         directory = lines[1].strip()
+
+        from src.personal_docs import resolve_personal_documents_dir
+        try:
+            directory = resolve_personal_documents_dir(directory)
+        except ValueError as exc:
+            return {"error": str(exc)}
 
         if not _personal_docs_manager:
             return {"error": "Personal docs manager not available"}
