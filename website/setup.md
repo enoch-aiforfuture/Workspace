@@ -30,7 +30,7 @@ docker compose up -d --build
 ```
 To include optional extras in the image (PDF viewer, Office extraction; includes AGPL PyMuPDF), build with `docker compose build --build-arg INSTALL_OPTIONAL=true` before `up`.
 
-**Official Docker images.** The compose files reference the official multi-arch image `workspace`, which CI (the `ci / docker publish` workflow) publishes on every push to `main` and `dev`. When the image is reachable, Compose pulls it instead of building — so the same files work on hosts without a build toolchain (Portainer stacks, Coolify, etc.). `--build` forces a local build regardless.
+**Official Docker images.** The compose files reference the official multi-arch image `ghcr.io/enoch-aiforfuture/workspace`, which CI (the `ci / docker publish` workflow) publishes on every push to `main` and `dev`. The repository name is lowercase; GHCR rejects `Workspace`. When the image is reachable, Compose pulls it instead of building — so the same files work on hosts without a build toolchain (Portainer stacks, Coolify, etc.). `--build` forces a local build regardless.
 
 Tag scheme:
 
@@ -43,7 +43,7 @@ Tag scheme:
 For production, pin the immutable tag by overriding the image in `.env` (or the stack's environment variables):
 
 ```bash
-WORKSPACE_IMAGE=workspace:1.0.2-7c8070f
+WORKSPACE_IMAGE=ghcr.io/enoch-aiforfuture/workspace:1.0.2-7c8070f
 ```
 
 Browse current tags at <https://github.com/enoch-aiforfuture/Workspace/pkgs/container/workspace>. (Until this package is made public and linked to the repo by an org owner, pulls fall back to the local build automatically — that fallback is intentional.)

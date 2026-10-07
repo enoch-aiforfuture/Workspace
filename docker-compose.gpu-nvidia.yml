@@ -13,13 +13,16 @@ services:
   workspace:
     # Official multi-arch GHCR image (linux/amd64 + linux/arm64), published by
     # the "ci / docker publish" workflow on every push to main and dev.
-    # Docker pulls this image when it is reachable, and only falls back to the
-    # local build below when the pull fails (e.g. no network on the host), so
-    # hosts without a build toolchain (Portainer stacks, etc.) get the
-    # registry build. For production, pin an immutable tag via WORKSPACE_IMAGE
-    # - e.g. workspace:1.0.2-7c8070f (X.Y.Z-<sha>) - since
+    # The repository name must be lowercase. A bare workspace:latest tag is
+    # Docker Hub (library/workspace), not this registry, so Compose would
+    # never pull the image CI publishes. Docker pulls this image when it is
+    # reachable, and only falls back to the local build below when the pull
+    # fails (private package, or no network), so hosts without a build
+    # toolchain (Portainer stacks, etc.) get the registry build. For
+    # production, pin an immutable tag via WORKSPACE_IMAGE - e.g.
+    # ghcr.io/enoch-aiforfuture/workspace:1.0.2-7c8070f (X.Y.Z-<sha>) - since
     # :latest and bare :X.Y.Z tags move on every main push.
-    image: ${WORKSPACE_IMAGE:-workspace:latest}
+    image: ${WORKSPACE_IMAGE:-ghcr.io/enoch-aiforfuture/workspace:latest}
     build: .
     ports:
       - "${APP_BIND:-127.0.0.1}:${APP_PORT:-7000}:7000"
